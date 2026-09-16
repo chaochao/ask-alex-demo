@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { X, RotateCcw, SendHorizontal } from "lucide-react";
 import { askStream } from "../../lib/api";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 type Msg = { role: "user" | "assistant"; text: string };
 type Tool = { tool: string; rows?: number };
@@ -44,26 +50,66 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
   }
 
   return (
-    <aside className="sidebar">
-      <header>
-        <strong>Ask Alex</strong>
-        <span className="spacer" style={{ flex: 1 }} />
-        <button onClick={() => { setMessages([]); setTools([]); threadId.current = undefined; }}>New</button>
-        <button onClick={onClose}>Close</button>
-      </header>
-      {pageContext?.label && <div className="ctx" style={{ padding: "6px 14px" }}>Viewing: {pageContext.label}</div>}
-      <div className="log" ref={logRef}>
-        {messages.length === 0 && suggestions.map((s) => (
-          <button key={s} style={{ textAlign: "left" }} onClick={() => send(s)}>{s}</button>
-        ))}
-        {messages.map((m, i) => <div key={i} className={`msg ${m.role}`}>{m.text || (busy && i === messages.length - 1 ? "…" : "")}</div>)}
-        {tools.map((t, i) => (
-          <span key={i} className="toolchip">{t.tool}{t.rows !== undefined ? ` · ${t.rows} rows` : ""}</span>
-        ))}
+    <aside className="fixed inset-y-0 right-0 z-30 flex h-svh w-full max-w-[420px] flex-col border-l bg-sidebar text-sidebar-foreground shadow-2xl lg:sticky lg:top-0 lg:shadow-none">
+      <div className="flex items-center gap-2 border-b px-4 py-3">
+        <strong className="text-sm font-semibold">Ask Alex</strong>
+        <div className="flex-1" />
+        <Button
+          size="icon-sm" variant="ghost"
+          onClick={() => { setMessages([]); setTools([]); threadId.current = undefined; }}
+          aria-label="New thread" title="New thread"
+        >
+          <RotateCcw />
+        </Button>
+        <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close">
+          <X />
+        </Button>
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); send(input); }}>
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about candidates, jobs, interviews…" />
-        <button type="submit" disabled={busy}>Ask</button>
+      {pageContext?.label && (
+        <div className="border-b px-4 py-2 text-xs text-muted-foreground">Viewing: {pageContext.label}</div>
+      )}
+      <div ref={logRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        {messages.length === 0 && suggestions.map((s) => (
+          <Button
+            key={s} variant="outline" size="sm"
+            className="h-auto justify-start text-left whitespace-normal"
+            onClick={() => send(s)}
+          >
+            {s}
+          </Button>
+        ))}
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={cn(
+              "text-sm",
+              m.role === "user"
+                ? "max-w-[85%] self-end rounded-lg bg-muted px-3 py-2 text-foreground"
+                : "whitespace-pre-wrap text-foreground",
+            )}
+          >
+            {m.text || (busy && i === messages.length - 1 ? "…" : "")}
+          </div>
+        ))}
+        {tools.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {tools.map((t, i) => (
+              <Badge key={i} variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">
+                {t.tool}{t.rows !== undefined ? ` · ${t.rows} rows` : ""}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+      <Separator />
+      <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="flex gap-2 p-3">
+        <Input
+          value={input} onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask about candidates, jobs, interviews…"
+        />
+        <Button type="submit" size="icon" disabled={busy} aria-label="Send">
+          <SendHorizontal />
+        </Button>
       </form>
     </aside>
   );
