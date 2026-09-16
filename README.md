@@ -42,5 +42,7 @@ web/
 
 ## Status
 
-Scaffolded end to end but **never installed or run** — the first `npm run setup` will surface
-version drift, especially in the Mastra files. See `CLAUDE.md` for what to verify first.
+Installed, seeded, running, and restyled (Tailwind v4 + shadcn/ui). Live at
+`chaochao/ask-alex-demo` on GitHub (private). See `CLAUDE.md` for the two version-drift fixes
+(Mastra's model wiring, a Tailwind v4 translate quirk) worth knowing before editing further, and
+for what's left (wiring the evals page).
