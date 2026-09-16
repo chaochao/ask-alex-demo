@@ -71,7 +71,7 @@ function NavLink({ to, path, icon: Icon, children }: { to: string; path: string;
         active ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >
-      <Icon className="size-4 transition-transform duration-200 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-110" />
+      <Icon className="size-4 translate-x-0 translate-y-0 transition-transform duration-200 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-110" />
       {children}
     </Link>
   );
@@ -112,7 +112,13 @@ function Shell() {
         </Button>
       </nav>
       <div className="flex min-h-[calc(100svh-3.5rem)]">
-        <main key={path} className={cn("page-transition min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8", open && "lg:mr-[420px]")}>
+        <main
+          key={path}
+          className={cn(
+            "page-transition min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8 motion-safe:lg:transition-[margin-right] motion-safe:lg:duration-300 motion-safe:lg:ease-in-out",
+            open && "lg:mr-[420px]",
+          )}
+        >
           <Outlet />
         </main>
         <AskAlexSidebar open={open} onClose={() => setOpen(false)} pageContext={{ route: path, ...ctx }} />

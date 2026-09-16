@@ -22,7 +22,6 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { logRef.current?.scrollTo({ top: 1e6 }); }, [messages, tools]);
-  if (!open) return null;
 
   const suggestions = pageContext?.entityType === "job"
     ? ["How is this pipeline doing?", "Top candidates for this role", "Generate 8 interview questions for this JD"]
@@ -50,7 +49,14 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
   }
 
   return (
-    <aside className="fixed top-14 right-0 bottom-0 z-30 flex w-full max-w-[420px] flex-col border-l bg-sidebar text-sidebar-foreground shadow-2xl">
+    <aside
+      inert={!open}
+      className={cn(
+        "fixed top-14 right-0 bottom-0 z-30 flex w-full max-w-[420px] flex-col border-l bg-sidebar text-sidebar-foreground shadow-2xl",
+        "motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-in-out",
+        open ? "translate-x-0 translate-y-0" : "pointer-events-none translate-x-full translate-y-0",
+      )}
+    >
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <strong className="text-sm font-semibold">Ask Alex</strong>
         <div className="flex-1" />
