@@ -194,12 +194,12 @@ async function main() {
     }});
     if (status !== "completed") continue;
     completed++;
-    // LLM-style scoring: competencies with evidence -> weighted mean -> overall
+    // LLM-style scoring: competencies with evidence -> weighted mean -> overall. 0-100 scale.
     const tilt = rnd();
     const comps = COMPETENCIES.filter(() => rnd() < 0.8).slice(0, 4);
     const list = (comps.length ? comps : ["coding","communication"]).map((c) => {
-      const score = Math.max(1, Math.min(5, Math.round(3 + (tilt - 0.45) * 4 + (rnd() - 0.5))));
-      return { competency: c, score, evidence: EVIDENCE[c][score >= 4 ? 0 : score === 3 ? 1 : 2] };
+      const score = Math.max(0, Math.min(100, Math.round(65 + (tilt - 0.45) * 70 + (rnd() - 0.5) * 20)));
+      return { competency: c, score, evidence: EVIDENCE[c][score >= 80 ? 0 : score >= 50 ? 1 : 2] };
     });
     const wsum = list.reduce((s, c) => s + WEIGHTS[c.competency], 0);
     const scoreRaw = list.reduce((s, c) => s + c.score * WEIGHTS[c.competency], 0) / wsum;
@@ -208,10 +208,10 @@ async function main() {
       interviewId: iv.id, submittedById: iv.interviewerId,
       source: completed <= 2 ? "human" : "llm",
       transcriptRef: `transcripts/${iv.id}.txt`,
-      overallScore, scoreRaw: Number(scoreRaw.toFixed(3)),
-      recommendation: scoreRaw >= 4.5 ? "strong_yes" : scoreRaw >= 3.5 ? "yes" : scoreRaw >= 2.5 ? "no" : "strong_no",
-      strengths: JSON.stringify(list.filter((c) => c.score >= 4).map((c) => c.competency)),
-      concerns: JSON.stringify(list.filter((c) => c.score <= 2).map((c) => c.competency)),
+      overallScore, scoreRaw: Number(scoreRaw.toFixed(2)),
+      recommendation: scoreRaw >= 90 ? "strong_yes" : scoreRaw >= 70 ? "yes" : scoreRaw >= 50 ? "no" : "strong_no",
+      strengths: JSON.stringify(list.filter((c) => c.score >= 80).map((c) => c.competency)),
+      concerns: JSON.stringify(list.filter((c) => c.score <= 40).map((c) => c.competency)),
       notes: `Scored from the transcript against the role rubric. ${list.map((c) => `${c.competency} ${c.score}`).join(", ")}.`,
       submittedAt: new Date(iv.completedAt!.getTime() + 36e5),
     }});

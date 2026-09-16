@@ -12,7 +12,7 @@ const filters = z.object({
   stage: z.enum(["applied","screening","interviewing","offer","hired","rejected"]).optional(),
   round: z.enum(["screen","technical","hiring_manager","onsite"]).optional(),
   source: z.string().optional(),
-  minScore: z.number().min(1).max(5).optional(),
+  minScore: z.number().min(0).max(100).optional(),
 }).optional();
 
 const windowSchema = z.object({

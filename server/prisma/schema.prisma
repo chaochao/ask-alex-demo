@@ -167,7 +167,7 @@ model Feedback {
   submittedById  String
   source         String    @default("llm")   // llm | human
   transcriptRef  String?
-  overallScore   Int                          // 1-5, shown
+  overallScore   Int                          // 0-100, shown
   scoreRaw       Float                        // weighted mean before rounding, sorted on
   recommendation String    // strong_no | no | yes | strong_yes
   strengths      String    // JSON string[]
@@ -183,7 +183,7 @@ model FeedbackCompetency {
   id         String   @id @default(cuid())
   feedbackId String
   competency String   // coding | system_design | communication | ownership | domain
-  score      Int
+  score      Int      // 0-100
   evidence   String
   feedback   Feedback @relation(fields: [feedbackId], references: [id])
   @@index([competency])

@@ -4,7 +4,7 @@ export const METRICS = {
     definition: "applications created, counted by applied date" },
   interviews_completed:{ label: "Interviews completed",    unit: "count",
     definition: "interviews with status = completed" },
-  avg_score:           { label: "Average interview score", unit: "score_1_5",
+  avg_score:           { label: "Average interview score", unit: "score_0_100",
     definition: "mean of scoreRaw over completed, scored interviews" },
   pass_rate:           { label: "Pass rate",               unit: "pct",
     definition: "completed interviews recommended yes or strong_yes ÷ completed interviews" },
@@ -16,7 +16,7 @@ export const METRICS = {
     definition: "mean days from applied date to first completed interview" },
   funnel_by_stage:     { label: "Applications by stage",   unit: "count",
     definition: "active applications grouped by current stage" },
-  competency_avg:      { label: "Average competency score", unit: "score_1_5",
+  competency_avg:      { label: "Average competency score", unit: "score_0_100",
     definition: "mean competency score across scored interviews" },
 } as const;
 

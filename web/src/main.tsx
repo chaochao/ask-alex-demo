@@ -211,7 +211,7 @@ function JobDetail() {
                   <TableCell className="text-muted-foreground">{a.interview.round}</TableCell>
                   <TableCell className="tabular-nums">
                     <span className="font-semibold">{a.interview.feedback.overallScore}</span>{" "}
-                    <span className="text-muted-foreground">({a.interview.feedback.scoreRaw.toFixed(2)})</span>
+                    <span className="text-muted-foreground">({a.interview.feedback.scoreRaw.toFixed(1)})</span>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{date(a.interview.completedAt)}</TableCell>
                 </TableRow>
@@ -417,7 +417,7 @@ function InterviewDetail() {
             <p className="flex flex-wrap items-baseline gap-2">
               <span className="text-3xl font-semibold tabular-nums">{i.feedback.overallScore}</span>
               <span className="text-sm text-muted-foreground">
-                raw {i.feedback.scoreRaw.toFixed(2)} · {i.feedback.recommendation.replace(/_/g, " ")} · scored by {i.feedback.source}
+                raw {i.feedback.scoreRaw.toFixed(1)} · {i.feedback.recommendation.replace(/_/g, " ")} · scored by {i.feedback.source}
               </span>
             </p>
           </section>

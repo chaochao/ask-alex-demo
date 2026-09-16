@@ -250,7 +250,7 @@ model Feedback {                     // invariant: every completed interview has
   source         String   @default("llm")  // llm | human — in the real product an LLM scores the
                                            // transcript, a human can override; demo seeds llm
   transcriptRef  String?                   // where the transcript lives, when there is one
-  overallScore   Int      // 1-5, rounded — what the UI shows
+  overallScore   Int      // 0-100, rounded — what the UI shows
   scoreRaw       Float    // weighted mean of competencies before rounding — what ranking sorts on
   recommendation String   // strong_no | no | yes | strong_yes
   strengths      String   // JSON string[]
@@ -266,7 +266,7 @@ model FeedbackCompetency {
   id         String @id @default(cuid())
   feedbackId String
   competency String  // coding | system_design | communication | ownership | domain
-  score      Int     // 1-5
+  score      Int     // 0-100
   feedback   Feedback @relation(fields: [feedbackId], references: [id])
   @@index([competency])
 }
@@ -427,9 +427,9 @@ Indexes are on the shapes the tools actually query: `(status, completedAt)` for 
 - **90 interviews, one per application** (so 90 of the 160 applications have one): **70 completed and
   all 70 scored**; 10 scheduled in the future; 5 no-shows; 5 cancelled. The `round` label still varies
   (screen / technical / hiring_manager / onsite) so "pass rate by round" stays a real question.
-- **70 feedback rows** — one per completed interview, `source: "llm"`, scores skewed to 3 with a few
-  1s and 5s so "why did X score low" has an answer, each with 3–5 competency scores and a `scoreRaw`
-  that spreads candidates within the same rounded score. Two rows are `source: "human"` overrides,
+- **70 feedback rows** — one per completed interview, `source: "llm"`, scores skewed to the 60s with a
+  few in the 20s and high-90s so "why did X score low" has an answer, each with 3–5 competency scores
+  and a `scoreRaw` that spreads candidates within the same rounded score. Two rows are `source: "human"` overrides,
   so provenance shows up somewhere in the UI.
 - **12 users** — 3 recruiters, 4 hiring managers, 5 interviewers, so ownership questions work.
 - **~40 skills**, wired to both jobs and candidates, with years.
@@ -450,7 +450,7 @@ metric, used by both the tools and any future dashboard.
 export const METRICS = {
   applications_count:   { label: "Applications",            unit: "count" },
   interviews_completed: { label: "Interviews completed",    unit: "count" },
-  avg_score:            { label: "Average interview score", unit: "score_1_5" },
+  avg_score:            { label: "Average interview score", unit: "score_0_100" },
   pass_rate:            { label: "Pass rate",               unit: "pct",  // recommendation in (yes, strong_yes)
                           definition: "completed interviews with a positive recommendation ÷ completed interviews" },
   time_to_first_interview_days: { label: "Time to first interview", unit: "days" },
@@ -659,7 +659,7 @@ export const queryEntities = createTool({
       round: z.enum(["screen","technical","hiring_manager","onsite"]).optional(),
       interviewStatus: z.enum(["scheduled","completed","no_show","cancelled"]).optional(),
       source: z.string().optional(),
-      minScore: z.number().min(1).max(5).optional(),
+      minScore: z.number().min(0).max(100).optional(),
     }).default({}),
     window: z.object({                          // code resolves dates, never the model
       field: z.enum(["interview_completed","interview_scheduled","applied","stage_changed"]),
@@ -804,7 +804,7 @@ rubric and writes one `Feedback` row; a human can override, and `Feedback.source
 | State | Condition | Score? |
 |---|---|---|
 | `scheduled` | in the future | not yet — excluded from rankings |
-| `scored` | status = completed | always: overall 1–5 + competencies |
+| `scored` | status = completed | always: overall 0–100 + competencies |
 | `no_score` | no_show or cancelled | never |
 | never interviewed | candidate in applied / screening | no score at all |
 
@@ -817,8 +817,8 @@ with quotes are checkable, and the overall becomes arithmetic.
 Rubric comes from the job (`JobSkill`) plus the round. Anchors are fixed text, not vibes:
 
 ```
-coding · 1 = could not produce working code  · 3 = working solution with guidance
-         4 = clean solution, handled edges unprompted · 5 = plus tests and complexity reasoning
+coding · 20 = could not produce working code · 60 = working solution with guidance
+         80 = clean solution, handled edges unprompted · 100 = plus tests and complexity reasoning
 ```
 
 Model output, validated against a Zod schema:
@@ -827,9 +827,9 @@ Model output, validated against a Zod schema:
 {
   "interviewId": "int_8123",
   "competencies": [
-    { "competency": "coding",        "score": 4, "evidence": "Wrote the sliding-window solution without hints; added the empty-input case unasked." },
-    { "competency": "system_design", "score": 3, "evidence": "Chose Postgres correctly but did not address the write path under load." },
-    { "competency": "communication", "score": 5, "evidence": "Restated the requirement, flagged an ambiguity before coding." }
+    { "competency": "coding",        "score": 80, "evidence": "Wrote the sliding-window solution without hints; added the empty-input case unasked." },
+    { "competency": "system_design", "score": 60, "evidence": "Chose Postgres correctly but did not address the write path under load." },
+    { "competency": "communication", "score": 100, "evidence": "Restated the requirement, flagged an ambiguity before coding." }
   ],
   "strengths": ["pragmatic data modeling", "explains tradeoffs unprompted"],
   "concerns": ["thin on scaling specifics"],
@@ -842,11 +842,11 @@ Code then derives, so it is reproducible and auditable:
 ```ts
 const WEIGHTS = { coding: 3, system_design: 3, communication: 2, ownership: 2, domain: 1 };
 
-scoreRaw       = weightedMean(competencies, WEIGHTS);   // 3.9 — ranking sorts on this
-overallScore   = Math.round(scoreRaw);                  // 4   — what the UI shows
-recommendation = scoreRaw >= 4.5 ? "strong_yes"
-               : scoreRaw >= 3.5 ? "yes"
-               : scoreRaw >= 2.5 ? "no" : "strong_no";
+scoreRaw       = weightedMean(competencies, WEIGHTS);   // 78 — ranking sorts on this
+overallScore   = Math.round(scoreRaw);                  // 78 — what the UI shows
+recommendation = scoreRaw >= 90 ? "strong_yes"
+               : scoreRaw >= 70 ? "yes"
+               : scoreRaw >= 50 ? "no" : "strong_no";
 ```
 
 Rules that keep it honest: every competency needs an `evidence` string drawn from the transcript,
@@ -860,8 +860,8 @@ With one round per application, ranking is three sorts and no statistics:
 
 1. **Stage first** — `offer 4 > interviewing 3 > screening 2 > applied 1`. "Top candidates for this
    req" means furthest along, then best scored. That is what a recruiter means.
-2. **Then `scoreRaw` descending.** Sorting on the rounded 1–5 would pile a dozen candidates on "4";
-   the unrounded weighted mean (3.9 vs 4.4) separates them honestly, while the UI still shows 4.
+2. **Then `scoreRaw` descending.** Sorting on the rounded overall score would pile a dozen candidates
+   on "78"; the unrounded weighted mean (78.2 vs 84.4) separates them honestly, while the UI still shows 78.
 3. **Then most recent interview.**
 
 Candidates with no completed interview are never silently dropped — they come back as counts, and
@@ -871,10 +871,10 @@ Worked example on one job:
 
 | Candidate | Stage | overallScore (shown) | scoreRaw (sorts) |
 |---|---|---|---|
-| Cara | offer | 4 | 4.10 |
-| Ben | interviewing | 5 | 4.60 |
-| Dev | interviewing | 4 | 3.80 |
-| Ana | screening | 5 | 4.75 |
+| Cara | offer | 82 | 82.0 |
+| Ben | interviewing | 92 | 92.0 |
+| Dev | interviewing | 76 | 76.0 |
+| Ana | screening | 95 | 95.0 |
 
 Order: **Cara, Ben, Dev, Ana** — stage first. Ask for `sort: { by: "score" }` and it becomes
 Ana, Ben, Cara, Dev. The answer always names which rule it used, because "top" is otherwise the
@@ -942,7 +942,7 @@ Seed every job with all five situations above — including two candidates whose
 awaiting feedback, and one with a single 5.0 that must **not** top a 4.6-across-three. Eval cases:
 
 - Order matches the SQL above, exactly.
-- Two candidates both showing 4 are ordered by `scoreRaw`, not by insertion order.
+- Two candidates both showing 80 are ordered by `scoreRaw`, not by insertion order.
 - The answer text names the ranking rule and reports the unscored buckets.
 - A job where nobody has been scored → no ranking, a count, and a suggestion to widen.
 - Scheduled, no-show and cancelled interviews never contribute to an average.
