@@ -99,7 +99,7 @@ function Shell() {
 
   return (
     <>
-      <nav className="sticky top-0 z-20 flex items-center gap-1 border-b bg-background/95 px-4 py-2.5 backdrop-blur supports-backdrop-filter:bg-background/80 sm:px-6">
+      <nav className="sticky top-0 z-20 flex h-14 items-center gap-1 border-b bg-background/95 px-4 backdrop-blur supports-backdrop-filter:bg-background/80 sm:px-6">
         <NavLink to="/jobs" path={path} icon={Briefcase}>Jobs</NavLink>
         <NavLink to="/candidates" path={path} icon={Users}>Candidates</NavLink>
         <NavLink to="/interviews" path={path} icon={CalendarCheck2}>Interviews</NavLink>
@@ -111,8 +111,8 @@ function Shell() {
           <kbd className="ml-1 hidden rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">⌘K</kbd>
         </Button>
       </nav>
-      <div className="flex min-h-[calc(100svh-49px)]">
-        <main key={path} className="page-transition min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="flex min-h-[calc(100svh-3.5rem)]">
+        <main key={path} className={cn("page-transition min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8", open && "lg:mr-[420px]")}>
           <Outlet />
         </main>
         <AskAlexSidebar open={open} onClose={() => setOpen(false)} pageContext={{ route: path, ...ctx }} />

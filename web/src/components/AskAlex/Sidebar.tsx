@@ -50,7 +50,7 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
   }
 
   return (
-    <aside className="fixed inset-y-0 right-0 z-30 flex h-svh w-full max-w-[420px] flex-col border-l bg-sidebar text-sidebar-foreground shadow-2xl lg:sticky lg:top-0 lg:shadow-none">
+    <aside className="fixed top-14 right-0 bottom-0 z-30 flex w-full max-w-[420px] flex-col border-l bg-sidebar text-sidebar-foreground shadow-2xl">
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <strong className="text-sm font-semibold">Ask Alex</strong>
         <div className="flex-1" />
