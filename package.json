@@ -1,0 +1,13 @@
+{
+  "name": "ask-alex-demo",
+  "private": true,
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "setup": "npm install && npm -w server run db:reset",
+    "dev": "npm-run-all --parallel dev:server dev:web",
+    "dev:server": "npm -w server run dev",
+    "dev:web": "npm -w web run dev",
+    "eval": "npm -w server run eval"
+  },
+  "devDependencies": { "npm-run-all": "^4.1.5" }
+}

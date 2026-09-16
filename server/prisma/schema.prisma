@@ -1,0 +1,292 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id       String @id @default(cuid())
+  name     String @unique
+  slug     String @unique
+  industry String
+  jobs     Job[]
+}
+
+model User {
+  id                String        @id @default(cuid())
+  name              String
+  email             String        @unique
+  role              String        // recruiter | hiring_manager | interviewer
+  team              String?
+  ownedJobs         Job[]         @relation("JobRecruiter")
+  managedJobs       Job[]         @relation("JobHiringManager")
+  ownedApplications Application[]
+  interviews        Interview[]
+  feedback          Feedback[]
+  activities        Activity[]
+}
+
+model Job {
+  id              String   @id @default(cuid())
+  companyId       String
+  recruiterId     String
+  hiringManagerId String?
+  title           String
+  roleFamily      String   // software_engineer | data_engineer | product_manager | designer
+  department      String
+  location        String
+  remotePolicy    String   // onsite | hybrid | remote
+  employmentType  String   // full_time | contract
+  seniority       String   // junior | mid | senior | staff
+  openings        Int      @default(1)
+  priority        String   // low | normal | high
+  status          String   // open | on_hold | closed
+  description     String
+  salaryMinCents  Int?
+  salaryMaxCents  Int?
+  targetHireDate  DateTime?
+  openedAt        DateTime
+  closedAt        DateTime?
+  company         Company  @relation(fields: [companyId], references: [id])
+  recruiter       User     @relation("JobRecruiter", fields: [recruiterId], references: [id])
+  hiringManager   User?    @relation("JobHiringManager", fields: [hiringManagerId], references: [id])
+  skills          JobSkill[]
+  applications    Application[]
+  questions       InterviewQuestion[]
+  @@index([companyId, roleFamily])
+  @@index([status, openedAt])
+}
+
+model Skill {
+  id         String @id @default(cuid())
+  name       String @unique
+  category   String
+  jobs       JobSkill[]
+  candidates CandidateSkill[]
+}
+
+model JobSkill {
+  jobId    String
+  skillId  String
+  required Boolean @default(true)
+  minYears Int?
+  job      Job     @relation(fields: [jobId], references: [id])
+  skill    Skill   @relation(fields: [skillId], references: [id])
+  @@id([jobId, skillId])
+}
+
+model Candidate {
+  id                  String   @id @default(cuid())
+  firstName           String
+  lastName            String
+  email               String   @unique
+  phone               String?
+  location            String?
+  timezone            String?
+  currentTitle        String?
+  currentCompany      String?
+  yearsExperience     Int
+  seniority           String
+  source              String   // referral | inbound | outbound | agency | job_board
+  sourceDetail        String?
+  referredById        String?
+  requiresSponsorship Boolean  @default(false)
+  availableInDays     Int?
+  desiredSalaryCents  Int?
+  status              String   // active | placed | withdrawn | do_not_contact
+  resumeText          String
+  linkedinUrl         String?
+  createdAt           DateTime
+  updatedAt           DateTime
+  skills              CandidateSkill[]
+  applications        Application[]
+  activities          Activity[]
+  @@index([status, createdAt])
+}
+
+model CandidateSkill {
+  candidateId String
+  skillId     String
+  years       Int?
+  candidate   Candidate @relation(fields: [candidateId], references: [id])
+  skill       Skill     @relation(fields: [skillId], references: [id])
+  @@id([candidateId, skillId])
+}
+
+model Application {
+  id             String    @id @default(cuid())
+  candidateId    String
+  jobId          String
+  ownerId        String
+  stage          String    // applied | screening | interviewing | offer | hired | rejected
+  stageEnteredAt DateTime
+  status         String    // active | rejected | withdrawn | hired
+  rejectedReason String?
+  rejectedById   String?
+  appliedAt      DateTime
+  updatedAt      DateTime
+  candidate      Candidate @relation(fields: [candidateId], references: [id])
+  job            Job       @relation(fields: [jobId], references: [id])
+  owner          User      @relation(fields: [ownerId], references: [id])
+  interview      Interview?
+  offer          Offer?
+  events         Event[]
+  activities     Activity[]
+  @@unique([candidateId, jobId])
+  @@index([jobId, stage])
+  @@index([stage, stageEnteredAt])
+}
+
+// DEMO: one interview per application (one round).
+model Interview {
+  id              String      @id @default(cuid())
+  applicationId   String      @unique
+  round           String      // screen | technical | hiring_manager | onsite
+  mode            String      // video | phone | onsite
+  interviewerId   String
+  scheduledAt     DateTime
+  durationMinutes Int         @default(60)
+  completedAt     DateTime?
+  status          String      // scheduled | completed | no_show | cancelled
+  noShowReason    String?
+  createdAt       DateTime
+  application     Application @relation(fields: [applicationId], references: [id])
+  interviewer     User        @relation(fields: [interviewerId], references: [id])
+  feedback        Feedback?
+  questions       InterviewQuestion[]
+  @@index([status, completedAt])
+  @@index([interviewerId, scheduledAt])
+}
+
+// invariant: every completed interview has exactly one Feedback row
+model Feedback {
+  id             String    @id @default(cuid())
+  interviewId    String    @unique
+  submittedById  String
+  source         String    @default("llm")   // llm | human
+  transcriptRef  String?
+  overallScore   Int                          // 1-5, shown
+  scoreRaw       Float                        // weighted mean before rounding, sorted on
+  recommendation String    // strong_no | no | yes | strong_yes
+  strengths      String    // JSON string[]
+  concerns       String    // JSON string[]
+  notes          String
+  submittedAt    DateTime
+  interview      Interview @relation(fields: [interviewId], references: [id])
+  submittedBy    User      @relation(fields: [submittedById], references: [id])
+  competencies   FeedbackCompetency[]
+}
+
+model FeedbackCompetency {
+  id         String   @id @default(cuid())
+  feedbackId String
+  competency String   // coding | system_design | communication | ownership | domain
+  score      Int
+  evidence   String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id])
+  @@index([competency])
+}
+
+model Offer {
+  id              String      @id @default(cuid())
+  applicationId   String      @unique
+  baseSalaryCents Int
+  bonusCents      Int?
+  equityPct       Float?
+  startDate       DateTime?
+  status          String      // extended | accepted | declined | rescinded | expired
+  extendedAt      DateTime
+  respondedAt     DateTime?
+  declineReason   String?
+  application     Application @relation(fields: [applicationId], references: [id])
+  @@index([status, extendedAt])
+}
+
+model InterviewQuestion {
+  id             String     @id @default(cuid())
+  jobId          String
+  interviewId    String?
+  generationId   String?
+  text           String
+  category       String     // technical | behavioral | system_design | role_specific
+  rationale      String
+  requirementIds String     // JSON string[]
+  difficulty     String
+  source         String     // generated | library
+  createdAt      DateTime   @default(now())
+  job            Job        @relation(fields: [jobId], references: [id])
+  interview      Interview? @relation(fields: [interviewId], references: [id])
+}
+
+model Activity {
+  id            String       @id @default(cuid())
+  candidateId   String
+  applicationId String?
+  userId        String
+  type          String       // note | email_sent | email_received | call | message
+  body          String
+  occurredAt    DateTime
+  recordedAt    DateTime
+  candidate     Candidate    @relation(fields: [candidateId], references: [id])
+  application   Application? @relation(fields: [applicationId], references: [id])
+  user          User         @relation(fields: [userId], references: [id])
+  @@index([candidateId, occurredAt])
+}
+
+// two clocks: occurredAt = when it happened, recordedAt = when we learned it
+model Event {
+  id            String      @id @default(cuid())
+  applicationId String
+  type          String
+  fromStage     String?
+  toStage       String?
+  occurredAt    DateTime
+  recordedAt    DateTime
+  application   Application @relation(fields: [applicationId], references: [id])
+  @@index([type, occurredAt])
+}
+
+model ChatThread {
+  id        String        @id @default(cuid())
+  title     String
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String     @id @default(cuid())
+  threadId  String
+  role      String
+  content   String
+  toolCalls String?
+  createdAt DateTime   @default(now())
+  thread    ChatThread @relation(fields: [threadId], references: [id])
+}
+
+model EvalRun {
+  id        String       @id @default(cuid())
+  model     String
+  startedAt DateTime     @default(now())
+  passed    Int
+  failed    Int
+  results   EvalResult[]
+}
+
+model EvalResult {
+  id        String  @id @default(cuid())
+  runId     String
+  caseId    String
+  passed    Boolean
+  failures  String
+  answer    String
+  toolsUsed String
+  latencyMs Int
+  run       EvalRun @relation(fields: [runId], references: [id])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
