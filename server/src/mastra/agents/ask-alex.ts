@@ -1,6 +1,7 @@
 // NOTE: verify the Agent constructor + stream() shape against installed docs
 // (.claude/skills/mastra → node_modules/@mastra/core/dist/docs) before trusting this file.
 import { Agent } from "@mastra/core/agent";
+import { openai } from "@ai-sdk/openai";
 import { tools } from "../tools/index.js";
 import { generateInterviewQuestions } from "../tools/generate-questions.js";
 import { METRIC_NAMES } from "../../semantic/metrics.js";
@@ -26,6 +27,6 @@ Rules:
 - This assistant is read-only. It cannot reject candidates, schedule interviews or send email.
 - Link records using the url each tool returns. Put an "as of" date on any number.
 - Be brief: two or three sentences, then a list when it helps.`,
-  model: process.env.MODEL ?? "openai/gpt-4.1-mini",
+  model: openai(process.env.MODEL ?? "gpt-5-mini"),
   tools: { ...tools, generateInterviewQuestions },
 });
