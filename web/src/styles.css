@@ -129,3 +129,14 @@
     @apply font-sans;
   }
 }
+
+/* page-to-page fade: the route's <main> is keyed by pathname, so it remounts
+   on every navigation and this animation replays from a fresh element. */
+@media (prefers-reduced-motion: no-preference) {
+  .page-transition {
+    animation: page-fade-in 220ms ease-out both;
+  }
+}
+@keyframes page-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+}

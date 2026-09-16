@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import {
   createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useParams, useRouterState,
 } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
+import { Briefcase, CalendarCheck2, Settings as SettingsIcon, Sparkles, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { AskAlexSidebar } from "./components/AskAlex/Sidebar";
 import { cn } from "@/lib/utils";
@@ -60,16 +61,17 @@ function SourceBadge({ source }: { source: string }) {
   );
 }
 
-function NavLink({ to, path, children }: { to: string; path: string; children: React.ReactNode }) {
+function NavLink({ to, path, icon: Icon, children }: { to: string; path: string; icon: LucideIcon; children: React.ReactNode }) {
   const active = path === to || path.startsWith(`${to}/`);
   return (
     <Link
       to={to}
       className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+        "group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
         active ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >
+      <Icon className="size-4 transition-transform duration-200 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-110" />
       {children}
     </Link>
   );
@@ -98,10 +100,10 @@ function Shell() {
   return (
     <>
       <nav className="sticky top-0 z-20 flex items-center gap-1 border-b bg-background/95 px-4 py-2.5 backdrop-blur supports-backdrop-filter:bg-background/80 sm:px-6">
-        <NavLink to="/jobs" path={path}>Jobs</NavLink>
-        <NavLink to="/candidates" path={path}>Candidates</NavLink>
-        <NavLink to="/interviews" path={path}>Interviews</NavLink>
-        <NavLink to="/settings" path={path}>Settings</NavLink>
+        <NavLink to="/jobs" path={path} icon={Briefcase}>Jobs</NavLink>
+        <NavLink to="/candidates" path={path} icon={Users}>Candidates</NavLink>
+        <NavLink to="/interviews" path={path} icon={CalendarCheck2}>Interviews</NavLink>
+        <NavLink to="/settings" path={path} icon={SettingsIcon}>Settings</NavLink>
         <div className="flex-1" />
         <Button size="sm" variant={open ? "secondary" : "outline"} onClick={() => setOpen((o) => !o)}>
           <Sparkles data-icon="inline-start" />
@@ -110,7 +112,7 @@ function Shell() {
         </Button>
       </nav>
       <div className="flex min-h-[calc(100svh-49px)]">
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">
+        <main key={path} className="page-transition min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">
           <Outlet />
         </main>
         <AskAlexSidebar open={open} onClose={() => setOpen(false)} pageContext={{ route: path, ...ctx }} />
