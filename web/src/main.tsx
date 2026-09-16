@@ -19,11 +19,45 @@ import "./styles.css";
 const money = (c?: number | null) => (c == null ? "—" : `$${Math.round(c / 100_000)}k`);
 const date = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
 
-const POSITIVE = new Set(["hired", "accepted", "completed", "strong_yes", "yes"]);
-const NEGATIVE = new Set(["closed", "rejected", "declined", "no_show", "cancelled", "withdrawn", "strong_no", "no", "on_hold", "do_not_contact"]);
+const TONE_CLASSES = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  info: "border-sky-200 bg-sky-50 text-sky-700",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+  danger: "border-rose-200 bg-rose-50 text-rose-700",
+  neutral: "border-transparent bg-secondary text-secondary-foreground",
+} as const;
+
+// job.status, application.stage and interview.status share one vocabulary of outcomes
+const STATUS_TONE: Record<string, keyof typeof TONE_CLASSES> = {
+  open: "success", hired: "success", completed: "success",
+  applied: "info", screening: "info", interviewing: "info", offer: "info", scheduled: "info",
+  on_hold: "warning", no_show: "warning", cancelled: "warning",
+  rejected: "danger",
+};
+
 function StatusBadge({ status }: { status: string }) {
-  const variant = POSITIVE.has(status) ? "default" : NEGATIVE.has(status) ? "outline" : "secondary";
-  return <Badge variant={variant} className="font-normal">{status.replace(/_/g, " ")}</Badge>;
+  return (
+    <Badge variant="outline" className={cn("font-normal", TONE_CLASSES[STATUS_TONE[status] ?? "neutral"])}>
+      {status.replace(/_/g, " ")}
+    </Badge>
+  );
+}
+
+// candidate.source is categorical, not good/bad — distinct hues, not a semantic scale
+const SOURCE_TONE_CLASSES: Record<string, string> = {
+  referral: "border-violet-200 bg-violet-50 text-violet-700",
+  inbound: "border-sky-200 bg-sky-50 text-sky-700",
+  outbound: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  agency: "border-orange-200 bg-orange-50 text-orange-700",
+  job_board: "border-slate-200 bg-slate-50 text-slate-700",
+};
+
+function SourceBadge({ source }: { source: string }) {
+  return (
+    <Badge variant="outline" className={cn("font-normal", SOURCE_TONE_CLASSES[source] ?? TONE_CLASSES.neutral)}>
+      {source.replace(/_/g, " ")}
+    </Badge>
+  );
 }
 
 function NavLink({ to, path, children }: { to: string; path: string; children: React.ReactNode }) {
@@ -269,7 +303,7 @@ function Candidates() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">{c.currentTitle}</TableCell>
                   <TableCell className="tabular-nums">{c.yearsExperience}</TableCell>
-                  <TableCell><Badge variant="secondary" className="font-normal">{c.source.replace(/_/g, " ")}</Badge></TableCell>
+                  <TableCell><SourceBadge source={c.source} /></TableCell>
                   <TableCell className="text-right tabular-nums">{c.applications.length}</TableCell>
                   <TableCell className="text-right font-semibold tabular-nums">{best ?? "—"}</TableCell>
                 </TableRow>
