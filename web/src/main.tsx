@@ -5,14 +5,13 @@ import {
   createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useParams, useRouterState,
 } from "@tanstack/react-router";
 import {
-  Briefcase, CalendarCheck2, Clock, Handshake, Inbox, ListChecks, MessagesSquare,
+  Briefcase, CalendarCheck2, ChevronLeft, ChevronRight, Clock, Handshake, Inbox, ListChecks, MessagesSquare,
   Settings as SettingsIcon, Sparkles, UserCheck, Users, XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { AskAlexSidebar } from "./components/AskAlex/Sidebar";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -22,22 +21,6 @@ import "./styles.css";
 
 const money = (c?: number | null) => (c == null ? "—" : `$${Math.round(c / 100_000)}k`);
 const date = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
-
-const TONE_CLASSES = {
-  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  info: "border-sky-200 bg-sky-50 text-sky-700",
-  warning: "border-amber-200 bg-amber-50 text-amber-800",
-  danger: "border-rose-200 bg-rose-50 text-rose-700",
-  neutral: "border-transparent bg-secondary text-secondary-foreground",
-} as const;
-
-// job.status, application.stage and interview.status share one vocabulary of outcomes
-const STATUS_TONE: Record<string, keyof typeof TONE_CLASSES> = {
-  open: "success", hired: "success", completed: "success",
-  applied: "info", screening: "info", interviewing: "info", offer: "info", scheduled: "info",
-  on_hold: "warning", no_show: "warning", cancelled: "warning",
-  rejected: "danger",
-};
 
 // Job pipeline stat cards: one color + icon per funnel stage, in natural progression order —
 // not sorted by count, so the row reads as a funnel rather than a leaderboard.
@@ -58,16 +41,19 @@ const STAGE_CARD_THEME: Record<string, WarmCardTone> = {
 
 // application.stage / job.status badge tones, warm-theme version — scoped to the job detail
 // page only, kept separate from the shared StatusBadge used elsewhere.
+// "open" reads as mint (the routine active state), not rust — rust is reserved for a hard-won
+// outcome (hired, offer), confirmed against the Jobs-list reference where "Open" pills are mint.
 const WARM_BADGE_TONE: Record<string, string> = {
   offer: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
   hired: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
-  open: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
-  completed: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
+  open: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   applied: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   screening: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   interviewing: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   scheduled: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  completed: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   rejected: "bg-[var(--warm-cream-badge)] text-[var(--warm-badge-ink)]",
+  closed: "bg-[var(--warm-cream-badge)] text-[var(--warm-badge-ink)]",
   on_hold: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
   no_show: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
   cancelled: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
@@ -134,28 +120,21 @@ function WarmDescription({ text }: { text: string }) {
   return <div className="space-y-3">{blocks}</div>;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <Badge variant="outline" className={cn("font-normal", TONE_CLASSES[STATUS_TONE[status] ?? "neutral"])}>
-      {status.replace(/_/g, " ")}
-    </Badge>
-  );
-}
-
-// candidate.source is categorical, not good/bad — distinct hues, not a semantic scale
-const SOURCE_TONE_CLASSES: Record<string, string> = {
-  referral: "border-violet-200 bg-violet-50 text-violet-700",
-  inbound: "border-sky-200 bg-sky-50 text-sky-700",
-  outbound: "border-cyan-200 bg-cyan-50 text-cyan-700",
-  agency: "border-orange-200 bg-orange-50 text-orange-700",
-  job_board: "border-slate-200 bg-slate-50 text-slate-700",
+// candidate.source is categorical, not good/bad — distinct hues, not a semantic scale.
+// Warm-theme version of the same categorical distinction, kept as separate
+// hues within the warm family rather than reusing the stage-badge tones.
+const WARM_SOURCE_TONE: Record<string, string> = {
+  referral: "bg-[var(--warm-rust)]/20 text-[var(--warm-rust-dark)]",
+  inbound: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  outbound: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
+  agency: "bg-[var(--warm-cream-badge)] text-[var(--warm-badge-ink)]",
+  job_board: "bg-[var(--warm-ink)]/10 text-[var(--warm-ink)]",
 };
-
-function SourceBadge({ source }: { source: string }) {
+function WarmSourceBadge({ source }: { source: string }) {
   return (
-    <Badge variant="outline" className={cn("font-normal", SOURCE_TONE_CLASSES[source] ?? TONE_CLASSES.neutral)}>
+    <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs capitalize", WARM_SOURCE_TONE[source] ?? "bg-[var(--warm-tan)] text-[var(--warm-ink)]")}>
       {source.replace(/_/g, " ")}
-    </Badge>
+    </span>
   );
 }
 
@@ -198,6 +177,10 @@ function Shell() {
   return (
     <>
       <nav className="sticky top-0 z-20 flex h-14 items-center gap-1 border-b bg-background/95 px-4 backdrop-blur supports-backdrop-filter:bg-background/80 sm:px-6">
+        <div className="warm-theme mr-3 flex items-center gap-2">
+          <span className="size-6 shrink-0 rounded-full bg-[var(--warm-rust)]" />
+          <span className="warm-heading text-lg">Trellis</span>
+        </div>
         <NavLink to="/jobs" path={path} icon={Briefcase}>Jobs</NavLink>
         <NavLink to="/candidates" path={path} icon={Users}>Candidates</NavLink>
         <NavLink to="/interviews" path={path} icon={CalendarCheck2}>Interviews</NavLink>
@@ -205,7 +188,7 @@ function Shell() {
         <div className="flex-1" />
         <Button size="sm" variant={open ? "secondary" : "outline"} onClick={() => setOpen((o) => !o)}>
           <Sparkles data-icon="inline-start" />
-          Ask Alex
+          Ask Chao
           <kbd className="ml-1 hidden rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">⌘K</kbd>
         </Button>
       </nav>
@@ -242,37 +225,81 @@ function Loading() {
   return <p className="text-sm text-muted-foreground">Loading…</p>;
 }
 
+const JOB_STATUS_FILTERS = ["all", "open", "on_hold", "closed"] as const;
+
 function Jobs() {
   const { data = [] } = useQuery({ queryKey: ["jobs"], queryFn: () => api<any[]>("/api/jobs") });
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<(typeof JOB_STATUS_FILTERS)[number]>("all");
+  const [page, setPage] = useState(0);
+
+  const totalApplications = data.reduce((sum, j) => sum + j._count.applications, 0);
+  const openCount = data.filter((j) => j.status === "open").length;
+
+  const q = query.trim().toLowerCase();
+  const filtered = data.filter((j) =>
+    (statusFilter === "all" || j.status === statusFilter) &&
+    (!q || j.title.toLowerCase().includes(q) || j.company.name.toLowerCase().includes(q)));
+  useEffect(() => setPage(0), [query, statusFilter]);
+  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   return (
-    <div>
-      <PageHeader title="Jobs" />
-      <div className="overflow-hidden rounded-lg border">
+    <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="warm-heading text-4xl sm:text-5xl">Jobs</h1>
+          <p className="text-sm opacity-70">{data.length} roles · {openCount} open · {totalApplications} applications total</p>
+        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search roles"
+          className="rounded-full bg-[var(--warm-tan)] px-4 py-2 text-sm outline-none placeholder:opacity-60"
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {JOB_STATUS_FILTERS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={cn(
+              "rounded-full px-3.5 py-1.5 text-sm capitalize",
+              statusFilter === s ? "bg-[var(--warm-ink)] text-[var(--warm-bg)]" : "bg-[var(--warm-tan)] opacity-80",
+            )}
+          >
+            {s === "all" ? "All" : s.replace(/_/g, " ")}
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-[2rem] bg-[var(--warm-tan)]">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Title</TableHead>
-              <TableHead>Company</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Applications</TableHead>
-              <TableHead>Opened</TableHead>
+            <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Title</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Company</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Status</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Applications</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Opened</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((j) => (
-              <TableRow key={j.id}>
-                <TableCell className="font-medium whitespace-normal">
-                  <Link to="/jobs/$jobId" params={{ jobId: j.id }} className="hover:underline">{j.title}</Link>
+            {pageItems.map((j) => (
+              <TableRow key={j.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-bg)]/40">
+                <TableCell className="whitespace-normal">
+                  <Link to="/jobs/$jobId" params={{ jobId: j.id }} className="warm-heading text-lg hover:underline">{j.title}</Link>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{j.company.name}</TableCell>
-                <TableCell><StatusBadge status={j.status} /></TableCell>
-                <TableCell className="text-right tabular-nums">{j._count.applications}</TableCell>
-                <TableCell className="text-muted-foreground">{date(j.openedAt)}</TableCell>
+                <TableCell className="opacity-70">{j.company.name}</TableCell>
+                <TableCell><WarmBadge status={j.status} /></TableCell>
+                <TableCell className="warm-heading">{j._count.applications}</TableCell>
+                <TableCell className="opacity-70">{date(j.openedAt)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+      <Pagination page={page} setPage={setPage} total={filtered.length} />
     </div>
   );
 }
@@ -292,6 +319,39 @@ function StageStatCard({ stage, value }: { stage: string; value: number }) {
         </span>
       </CardContent>
     </Card>
+  );
+}
+
+const PAGE_SIZE = 20;
+
+// Client-side pagination: lists are fully fetched already (search/filter work over the whole
+// set), so this just limits how many rows mount in the DOM at once — that's what was slow.
+function Pagination({ page, setPage, total }: { page: number; setPage: (p: number) => void; total: number }) {
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (pageCount <= 1) return null;
+  const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const to = Math.min(total, (page + 1) * PAGE_SIZE);
+  return (
+    <div className="flex items-center justify-between text-sm opacity-80">
+      <span>{from}–{to} of {total}</span>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setPage(Math.max(0, page - 1))}
+          disabled={page === 0}
+          className="flex size-8 items-center justify-center rounded-full bg-[var(--warm-tan)] disabled:opacity-40"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        <span>Page {page + 1} of {pageCount}</span>
+        <button
+          onClick={() => setPage(Math.min(pageCount - 1, page + 1))}
+          disabled={page >= pageCount - 1}
+          className="flex size-8 items-center justify-center rounded-full bg-[var(--warm-tan)] disabled:opacity-40"
+        >
+          <ChevronRight className="size-4" />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -442,7 +502,7 @@ function JobDetail() {
             <Sparkles className="size-3.5" /> Generated questions
           </h2>
           {j.questions.length === 0 ? (
-            <p className="text-sm opacity-70">None yet — ask Ask Alex to generate some.</p>
+            <p className="text-sm opacity-70">None yet — ask Ask Chao to generate some.</p>
           ) : (
             <div className="space-y-3">
               {j.questions.map((q: any) => (
@@ -459,44 +519,89 @@ function JobDetail() {
   );
 }
 
+const CANDIDATE_SOURCES = ["all", "referral", "inbound", "outbound", "agency", "job_board"] as const;
+
 function Candidates() {
   const { data = [] } = useQuery({ queryKey: ["candidates"], queryFn: () => api<any[]>("/api/candidates") });
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<(typeof CANDIDATE_SOURCES)[number]>("all");
+  const [page, setPage] = useState(0);
+
+  const activeCount = data.filter((c) => c.status === "active").length;
+  const avgYears = data.length ? Math.round(data.reduce((sum, c) => sum + c.yearsExperience, 0) / data.length) : 0;
+
+  const q = query.trim().toLowerCase();
+  const filtered = data.filter((c) =>
+    (sourceFilter === "all" || c.source === sourceFilter) &&
+    (!q || `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) || (c.currentTitle ?? "").toLowerCase().includes(q)));
+  useEffect(() => setPage(0), [query, sourceFilter]);
+  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   return (
-    <div>
-      <PageHeader title="Candidates" />
-      <div className="overflow-hidden rounded-lg border">
+    <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="warm-heading text-4xl sm:text-5xl">Candidates</h1>
+          <p className="text-sm opacity-70">{data.length} candidates · {activeCount} active · avg {avgYears}y experience</p>
+        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search candidates"
+          className="rounded-full bg-[var(--warm-tan)] px-4 py-2 text-sm outline-none placeholder:opacity-60"
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {CANDIDATE_SOURCES.map((s) => (
+          <button
+            key={s}
+            onClick={() => setSourceFilter(s)}
+            className={cn(
+              "rounded-full px-3.5 py-1.5 text-sm capitalize",
+              sourceFilter === s ? "bg-[var(--warm-ink)] text-[var(--warm-bg)]" : "bg-[var(--warm-tan)] opacity-80",
+            )}
+          >
+            {s === "all" ? "All" : s.replace(/_/g, " ")}
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-[2rem] bg-[var(--warm-tan)]">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead>Years</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead className="text-right">Applications</TableHead>
-              <TableHead className="text-right">Best score</TableHead>
+            <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Name</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Title</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Years</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Source</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Applications</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Best score</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((c) => {
-              const best = c.applications.map((a: any) => a.interview?.feedback?.overallScore).filter(Boolean).sort().at(-1);
+            {pageItems.map((c) => {
+              const scores = c.applications.map((a: any) => a.interview?.feedback?.overallScore).filter((s: unknown) => typeof s === "number");
+              const best = scores.length ? Math.max(...scores) : null;
               return (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium">
-                    <Link to="/candidates/$candidateId" params={{ candidateId: c.id }} className="hover:underline">
+                <TableRow key={c.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-bg)]/40">
+                  <TableCell>
+                    <Link to="/candidates/$candidateId" params={{ candidateId: c.id }} className="warm-heading text-lg hover:underline">
                       {c.firstName} {c.lastName}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{c.currentTitle}</TableCell>
-                  <TableCell className="tabular-nums">{c.yearsExperience}</TableCell>
-                  <TableCell><SourceBadge source={c.source} /></TableCell>
-                  <TableCell className="text-right tabular-nums">{c.applications.length}</TableCell>
-                  <TableCell className="text-right font-semibold tabular-nums">{best ?? "—"}</TableCell>
+                  <TableCell className="opacity-70">{c.currentTitle}</TableCell>
+                  <TableCell className="opacity-70">{c.yearsExperience}</TableCell>
+                  <TableCell><WarmSourceBadge source={c.source} /></TableCell>
+                  <TableCell className="opacity-70">{c.applications.length}</TableCell>
+                  <TableCell className="warm-heading">{best ?? "—"}</TableCell>
                 </TableRow>
               );
             })}
           </TableBody>
         </Table>
       </div>
+      <Pagination page={page} setPage={setPage} total={filtered.length} />
     </div>
   );
 }
@@ -589,43 +694,92 @@ function CandidateDetail() {
   );
 }
 
+const INTERVIEW_STATUSES = ["all", "scheduled", "completed", "no_show", "cancelled"] as const;
+
 function Interviews() {
   const { data = [] } = useQuery({ queryKey: ["interviews"], queryFn: () => api<any[]>("/api/interviews") });
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<(typeof INTERVIEW_STATUSES)[number]>("all");
+  const [page, setPage] = useState(0);
+
+  const completed = data.filter((i) => i.status === "completed");
+  const scores = completed.map((i) => i.feedback?.overallScore).filter((s) => typeof s === "number");
+  const avgScore = scores.length ? Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length) : null;
+
+  const q = query.trim().toLowerCase();
+  const filtered = data.filter((i) =>
+    (statusFilter === "all" || i.status === statusFilter) &&
+    (!q
+      || `${i.application.candidate.firstName} ${i.application.candidate.lastName}`.toLowerCase().includes(q)
+      || i.application.job.title.toLowerCase().includes(q)));
+  useEffect(() => setPage(0), [query, statusFilter]);
+  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   return (
-    <div>
-      <PageHeader title="Interviews" />
-      <div className="overflow-hidden rounded-lg border">
+    <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="warm-heading text-4xl sm:text-5xl">Interviews</h1>
+          <p className="text-sm opacity-70">
+            {data.length} interviews · {completed.length} completed{avgScore != null ? ` · avg score ${avgScore}` : ""}
+          </p>
+        </div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search interviews"
+          className="rounded-full bg-[var(--warm-tan)] px-4 py-2 text-sm outline-none placeholder:opacity-60"
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {INTERVIEW_STATUSES.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={cn(
+              "rounded-full px-3.5 py-1.5 text-sm capitalize",
+              statusFilter === s ? "bg-[var(--warm-ink)] text-[var(--warm-bg)]" : "bg-[var(--warm-tan)] opacity-80",
+            )}
+          >
+            {s === "all" ? "All" : s.replace(/_/g, " ")}
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-[2rem] bg-[var(--warm-tan)]">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Candidate</TableHead>
-              <TableHead>Job</TableHead>
-              <TableHead>Round</TableHead>
-              <TableHead>Interviewer</TableHead>
-              <TableHead>When</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Score</TableHead>
+            <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Candidate</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Job</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Interviewer</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">When</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Status</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Score</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((i) => (
-              <TableRow key={i.id}>
-                <TableCell className="font-medium">
-                  <Link to="/interviews/$interviewId" params={{ interviewId: i.id }} className="hover:underline">
+            {pageItems.map((i) => (
+              <TableRow key={i.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-bg)]/40">
+                <TableCell>
+                  <Link to="/interviews/$interviewId" params={{ interviewId: i.id }} className="warm-heading text-lg hover:underline">
                     {i.application.candidate.firstName} {i.application.candidate.lastName}
                   </Link>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{i.application.job.title}</TableCell>
-                <TableCell>{i.round}</TableCell>
-                <TableCell className="text-muted-foreground">{i.interviewer.name}</TableCell>
-                <TableCell className="text-muted-foreground">{date(i.completedAt ?? i.scheduledAt)}</TableCell>
-                <TableCell><StatusBadge status={i.status} /></TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">{i.feedback?.overallScore ?? "—"}</TableCell>
+                <TableCell className="opacity-70">{i.application.job.title}</TableCell>
+                <TableCell className="opacity-70 capitalize">{i.round.replace(/_/g, " ")}</TableCell>
+                <TableCell className="opacity-70">{i.interviewer.name}</TableCell>
+                <TableCell className="opacity-70">{date(i.completedAt ?? i.scheduledAt)}</TableCell>
+                <TableCell><WarmBadge status={i.status} /></TableCell>
+                <TableCell className="warm-heading">{i.feedback?.overallScore ?? "—"}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+      <Pagination page={page} setPage={setPage} total={filtered.length} />
     </div>
   );
 }
