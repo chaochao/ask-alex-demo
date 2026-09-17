@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import {
   createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useParams, useRouterState,
 } from "@tanstack/react-router";
-import { Briefcase, CalendarCheck2, Settings as SettingsIcon, Sparkles, Users } from "lucide-react";
+import {
+  Briefcase, CalendarCheck2, Clock, Handshake, Inbox, ListChecks, MessagesSquare,
+  Settings as SettingsIcon, Sparkles, UserCheck, Users, XCircle,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "./lib/api";
 import { AskAlexSidebar } from "./components/AskAlex/Sidebar";
@@ -35,6 +38,101 @@ const STATUS_TONE: Record<string, keyof typeof TONE_CLASSES> = {
   on_hold: "warning", no_show: "warning", cancelled: "warning",
   rejected: "danger",
 };
+
+// Job pipeline stat cards: one color + icon per funnel stage, in natural progression order —
+// not sorted by count, so the row reads as a funnel rather than a leaderboard.
+const STAGE_ORDER = ["applied", "screening", "interviewing", "offer", "hired", "rejected"] as const;
+// Colors/type from Hiring Platform.html (warm-theme palette) — tan for the neutral early stages,
+// mint deepening toward rust as a candidate advances, rust-bold for the outcome that matters (hired),
+// and the same muted outline for anything no longer moving (rejected, not yet interviewed).
+type WarmCardTone = { icon: LucideIcon; bg: string; ink: string; iconBg: string; iconInk: string; border?: boolean };
+const STAGE_CARD_THEME: Record<string, WarmCardTone> = {
+  applied: { icon: Inbox, bg: "bg-[var(--warm-tan)]", ink: "text-[var(--warm-ink)]", iconBg: "bg-[var(--warm-ink)]/10", iconInk: "text-[var(--warm-ink)]" },
+  screening: { icon: ListChecks, bg: "bg-[var(--warm-tan)]", ink: "text-[var(--warm-ink)]", iconBg: "bg-[var(--warm-ink)]/10", iconInk: "text-[var(--warm-ink)]" },
+  interviewing: { icon: MessagesSquare, bg: "bg-[var(--warm-mint)]", ink: "text-[var(--warm-mint-ink)]", iconBg: "bg-[var(--warm-mint-ink)]/15", iconInk: "text-[var(--warm-mint-ink)]" },
+  offer: { icon: Handshake, bg: "bg-[var(--warm-rust)]/15", ink: "text-[var(--warm-rust-dark)]", iconBg: "bg-[var(--warm-rust-dark)]/15", iconInk: "text-[var(--warm-rust-dark)]" },
+  hired: { icon: UserCheck, bg: "bg-[var(--warm-rust)]", ink: "text-[var(--warm-bg)]", iconBg: "bg-[var(--warm-bg)]", iconInk: "text-[var(--warm-rust-dark)]" },
+  rejected: { icon: XCircle, bg: "bg-transparent", ink: "text-[var(--warm-ink)]", iconBg: "bg-[var(--warm-ink)]/10", iconInk: "text-[var(--warm-ink)]", border: true },
+  not_yet_interviewed: { icon: Clock, bg: "bg-transparent", ink: "text-[var(--warm-ink)]", iconBg: "bg-[var(--warm-ink)]/10", iconInk: "text-[var(--warm-ink)]", border: true },
+};
+
+// application.stage / job.status badge tones, warm-theme version — scoped to the job detail
+// page only, kept separate from the shared StatusBadge used elsewhere.
+const WARM_BADGE_TONE: Record<string, string> = {
+  offer: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
+  hired: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
+  open: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
+  completed: "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]",
+  applied: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  screening: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  interviewing: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  scheduled: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  rejected: "bg-[var(--warm-cream-badge)] text-[var(--warm-badge-ink)]",
+  on_hold: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
+  no_show: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
+  cancelled: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
+};
+
+function WarmBadge({ status }: { status: string }) {
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs capitalize", WARM_BADGE_TONE[status] ?? "bg-[var(--warm-tan)] text-[var(--warm-ink)]")}>
+      {status.replace(/_/g, " ")}
+    </span>
+  );
+}
+
+// job.description is plain text following one convention: "## Heading" sections, "- " bullets,
+// "N. " numbered lists. Parsed here rather than pulled from markdown, since the seed data always
+// follows this exact shape and a library would be more code to render the same three cases.
+function WarmDescription({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let list: { type: "bullet" | "number"; items: string[] } | null = null;
+  const flushList = () => {
+    if (!list) return;
+    if (list.type === "bullet") {
+      blocks.push(
+        <ul key={blocks.length} className="ml-1 list-disc space-y-1 pl-4 text-sm">
+          {list.items.map((it, i) => <li key={i}>{it}</li>)}
+        </ul>,
+      );
+    } else {
+      blocks.push(
+        <ol key={blocks.length} className="space-y-2">
+          {list.items.map((it, i) => (
+            <li key={i} className="flex items-baseline gap-3 text-sm">
+              <span className="warm-heading flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--warm-bg)] text-xs">{i + 1}</span>
+              <span>{it}</span>
+            </li>
+          ))}
+        </ol>,
+      );
+    }
+    list = null;
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const heading = /^#{1,3}\s+(.*)/.exec(line);
+    const bullet = /^-\s+(.*)/.exec(line);
+    const numbered = /^\d+\.\s+(.*)/.exec(line);
+    if (heading) {
+      flushList();
+      blocks.push(<h3 key={blocks.length} className="warm-heading text-xl">{heading[1]}</h3>);
+    } else if (bullet) {
+      if (list?.type !== "bullet") flushList();
+      (list ??= { type: "bullet", items: [] }).items.push(bullet[1]);
+    } else if (numbered) {
+      if (list?.type !== "number") flushList();
+      (list ??= { type: "number", items: [] }).items.push(numbered[1]);
+    } else {
+      flushList();
+      blocks.push(<p key={blocks.length} className="text-sm text-[var(--warm-body)]">{line}</p>);
+    }
+  }
+  flushList();
+  return <div className="space-y-3">{blocks}</div>;
+}
 
 function StatusBadge({ status }: { status: string }) {
   return (
@@ -179,6 +277,81 @@ function Jobs() {
   );
 }
 
+function StageStatCard({ stage, value }: { stage: string; value: number }) {
+  const theme = STAGE_CARD_THEME[stage] ?? STAGE_CARD_THEME.applied;
+  const Icon = theme.icon;
+  return (
+    <Card size="sm" className={cn("rounded-[2rem] border-0 shadow-none", theme.bg, theme.border && "ring-1 ring-[var(--warm-border)]")}>
+      <CardContent className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className={cn("warm-heading text-3xl", theme.ink)}>{value}</div>
+          <div className={cn("text-xs opacity-80", theme.ink)}>{stage.replace(/_/g, " ")}</div>
+        </div>
+        <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", theme.iconBg, theme.iconInk)}>
+          <Icon className="size-4" />
+        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Donut ring via conic-gradient — no chart library for one shape. `trackBg` must match whatever
+// card background the ring sits on, since the hole is punched by an inner circle of that color.
+function ScoreRing({ value, trackBg = "var(--warm-tan)" }: { value: number; trackBg?: string }) {
+  const pct = Math.max(0, Math.min(100, value));
+  return (
+    <div
+      className="relative flex size-24 shrink-0 items-center justify-center rounded-full"
+      style={{ background: `conic-gradient(var(--warm-rust) ${pct}%, ${trackBg} ${pct}% 100%)` }}
+    >
+      <div className="absolute inset-[7px] rounded-full" style={{ background: trackBg }} />
+      <span className="warm-heading relative text-2xl">{value}</span>
+    </div>
+  );
+}
+
+// The schema's real recommendation values, in order — no "mixed" here, unlike the reference,
+// because Feedback.recommendation only ever holds one of these four (see schema-guide.ts).
+const RECOMMENDATION_SCALE = ["strong_no", "no", "yes", "strong_yes"] as const;
+function RecommendationScale({ value }: { value: string }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {RECOMMENDATION_SCALE.map((r) => (
+        <span
+          key={r}
+          className={cn(
+            "rounded-full px-2.5 py-1 text-xs capitalize",
+            r === value ? "bg-[var(--warm-rust-dark)] text-[var(--warm-bg)]" : "bg-[var(--warm-bg)] text-[var(--warm-ink)] opacity-70",
+          )}
+        >
+          {r.replace(/_/g, " ")}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Score bands: no real "passing bar" exists in the data, so 50 (the midpoint of the 0-100 scale)
+// is used as the good/below-bar threshold — a defensible default, not a measured cutoff.
+function CompetencyBar({ label, score, evidence }: { label: string; score: number; evidence: string }) {
+  const pct = Math.max(0, Math.min(100, score));
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between">
+        <span className="warm-heading text-lg capitalize">{label.replace(/_/g, " ")}</span>
+        <span className="warm-heading text-lg">{score}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-[var(--warm-tan)]">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${pct}%`, background: score >= 50 ? "var(--warm-good)" : "var(--warm-rust)" }}
+        />
+      </div>
+      <p className="text-sm opacity-70">{evidence}</p>
+    </div>
+  );
+}
+
 function JobDetail() {
   const { jobId } = useParams({ strict: false }) as { jobId: string };
   const { data: j } = useQuery({ queryKey: ["job", jobId], queryFn: () => api<any>(`/api/jobs/${jobId}`) });
@@ -186,98 +359,102 @@ function JobDetail() {
   const ranked = [...j.applications]
     .filter((a: any) => a.interview?.feedback)
     .sort((a: any, b: any) => b.interview.feedback.scoreRaw - a.interview.feedback.scoreRaw);
+  const byStage: Record<string, number> = Object.fromEntries(j.byStage.map((s: any) => [s.dimension, s.value]));
+  const stageCards = STAGE_ORDER.filter((s) => byStage[s] != null).map((s) => ({ stage: s, value: byStage[s] }));
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title={j.title}
-        subtitle={`${j.company.name} · ${j.seniority} · ${j.location} · ${money(j.salaryMinCents)}–${money(j.salaryMaxCents)} · recruiter ${j.recruiter.name}`}
-      />
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {j.byStage.map((s: any) => (
-          <Card key={s.dimension} size="sm">
-            <CardContent className="space-y-1">
-              <div className="text-2xl font-semibold tabular-nums">{s.value}</div>
-              <div className="text-xs text-muted-foreground">{s.dimension}</div>
-            </CardContent>
-          </Card>
-        ))}
-        <Card size="sm">
-          <CardContent className="space-y-1">
-            <div className="text-2xl font-semibold tabular-nums">{j.buckets.notYetInterviewed}</div>
-            <div className="text-xs text-muted-foreground">not yet interviewed</div>
-          </CardContent>
-        </Card>
+    <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+      <div className="space-y-1">
+        <h1 className="warm-heading text-4xl sm:text-5xl">{j.title}</h1>
+        <p className="text-sm opacity-70">
+          {j.seniority} · {j.location} · {money(j.salaryMinCents)}–{money(j.salaryMaxCents)} · recruiter {j.recruiter.name}
+        </p>
       </div>
 
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Requirements</h2>
-        <ul className="space-y-1.5 text-sm">
-          {j.skills.map((s: any) => (
-            <li key={s.skillId} className="flex items-center gap-2">
-              <span>{s.skill.name}</span>
-              {s.required && <Badge variant="secondary" className="font-normal">required</Badge>}
-              {s.minYears && <span className="text-xs text-muted-foreground">{s.minYears}y+</span>}
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
+        {stageCards.map(({ stage, value }) => <StageStatCard key={stage} stage={stage} value={value} />)}
+        <StageStatCard stage="not_yet_interviewed" value={j.buckets.notYetInterviewed} />
+      </div>
 
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Description</h2>
-        <pre className="text-wrap font-sans text-sm text-foreground/90 whitespace-pre-wrap">{j.description}</pre>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Scored candidates</h2>
-        <div className="overflow-hidden rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Candidate</TableHead>
-                <TableHead>Stage</TableHead>
-                <TableHead>Round</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Interviewed</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {ranked.map((a: any) => (
-                <TableRow key={a.id}>
-                  <TableCell className="font-medium">
-                    <Link to="/candidates/$candidateId" params={{ candidateId: a.candidate.id }} className="hover:underline">
-                      {a.candidate.firstName} {a.candidate.lastName}
-                    </Link>
-                  </TableCell>
-                  <TableCell><StatusBadge status={a.stage} /></TableCell>
-                  <TableCell className="text-muted-foreground">{a.interview.round}</TableCell>
-                  <TableCell className="tabular-nums">
-                    <span className="font-semibold">{a.interview.feedback.overallScore}</span>{" "}
-                    <span className="text-muted-foreground">({a.interview.feedback.scoreRaw.toFixed(1)})</span>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{date(a.interview.completedAt)}</TableCell>
-                </TableRow>
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_22rem]">
+        <div className="space-y-8">
+          <section>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Requirements</h2>
+            <div className="space-y-2">
+              {j.skills.map((s: any) => (
+                <div key={s.skillId} className="flex items-center justify-between rounded-2xl bg-[var(--warm-tan)] px-5 py-3.5">
+                  <span className="text-sm font-medium">{s.skill.name}</span>
+                  <div className="flex items-center gap-3">
+                    {s.required
+                      ? <span className="rounded-full bg-[var(--warm-rust-dark)] px-2.5 py-0.5 text-xs text-[var(--warm-bg)]">Required</span>
+                      : <span className="rounded-full bg-[var(--warm-mint)] px-2.5 py-0.5 text-xs text-[var(--warm-mint-ink)]">Nice to have</span>}
+                    <span className="w-10 text-right text-xs opacity-60">{s.minYears ? `${s.minYears}y+` : "—"}</span>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+            </div>
+          </section>
 
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Generated questions</h2>
-        {j.questions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">None yet — ask Ask Alex to generate some.</p>
-        ) : (
-          <ul className="space-y-2">
-            {j.questions.map((q: any) => (
-              <li key={q.id} className="flex items-start gap-2 text-sm">
-                <Badge variant="secondary" className="mt-0.5 shrink-0 font-normal">{q.category}</Badge>
-                <span>{q.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          <section>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Description</h2>
+            <div className="rounded-[2rem] bg-[var(--warm-tan)] p-6">
+              <WarmDescription text={j.description} />
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Scored candidates</h2>
+            <div className="overflow-hidden rounded-[2rem] border border-[var(--warm-border)]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Candidate</TableHead>
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Stage</TableHead>
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Score</TableHead>
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Interviewed</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ranked.map((a: any) => (
+                    <TableRow key={a.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-tan)]/40">
+                      <TableCell className="font-medium">
+                        <Link to="/candidates/$candidateId" params={{ candidateId: a.candidate.id }} className="hover:underline">
+                          {a.candidate.firstName} {a.candidate.lastName}
+                        </Link>
+                      </TableCell>
+                      <TableCell><WarmBadge status={a.stage} /></TableCell>
+                      <TableCell className="opacity-70 capitalize">{a.interview.round.replace(/_/g, " ")}</TableCell>
+                      <TableCell className="tabular-nums">
+                        <span className="warm-heading">{a.interview.feedback.overallScore}</span>{" "}
+                        <span className="opacity-60">({a.interview.feedback.scoreRaw.toFixed(1)})</span>
+                      </TableCell>
+                      <TableCell className="opacity-70">{date(a.interview.completedAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+        </div>
+
+        <section className="lg:sticky lg:top-20 lg:self-start">
+          <h2 className="mb-3 flex items-center gap-1.5 text-xs font-medium tracking-wide uppercase opacity-60">
+            <Sparkles className="size-3.5" /> Generated questions
+          </h2>
+          {j.questions.length === 0 ? (
+            <p className="text-sm opacity-70">None yet — ask Ask Alex to generate some.</p>
+          ) : (
+            <div className="space-y-3">
+              {j.questions.map((q: any) => (
+                <div key={q.id} className="space-y-2 rounded-[1.25rem] border border-[var(--warm-border)] bg-[var(--warm-bg)] p-4">
+                  <span className="inline-flex rounded-full bg-[var(--warm-tan)] px-2.5 py-0.5 text-xs capitalize">{q.category.replace(/_/g, " ")}</span>
+                  <p className="text-sm">{q.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -329,74 +506,85 @@ function CandidateDetail() {
   const { data: c } = useQuery({ queryKey: ["candidate", candidateId], queryFn: () => api<any>(`/api/candidates/${candidateId}`) });
   if (!c) return <Loading />;
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title={`${c.firstName} ${c.lastName}`}
-        subtitle={`${c.currentTitle} at ${c.currentCompany} · ${c.yearsExperience}y · ${c.location} · ${c.source.replace(/_/g, " ")}${c.requiresSponsorship ? " · needs sponsorship" : ""}`}
-      />
+    <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+      <div className="space-y-1">
+        <h1 className="warm-heading text-4xl sm:text-5xl">{c.firstName} {c.lastName}</h1>
+        <p className="text-sm opacity-70">
+          {c.currentTitle} at {c.currentCompany} · {c.yearsExperience}y · {c.location} · {c.source.replace(/_/g, " ")}
+          {c.requiresSponsorship ? " · needs sponsorship" : ""}
+        </p>
+      </div>
 
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Skills</h2>
-        <div className="flex flex-wrap gap-1.5">
-          {c.skills.map((s: any) => (
-            <Badge key={s.skillId} variant="secondary" className="font-normal">
-              {s.skill.name}{s.years ? ` · ${s.years}y` : ""}
-            </Badge>
-          ))}
-        </div>
-      </section>
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_22rem]">
+        <div className="space-y-8">
+          <section>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Skills</h2>
+            <div className="flex flex-wrap gap-1.5">
+              {c.skills.map((s: any) => (
+                <span key={s.skillId} className="rounded-full bg-[var(--warm-tan)] px-3 py-1 text-xs">
+                  {s.skill.name}{s.years ? ` · ${s.years}y` : ""}
+                </span>
+              ))}
+            </div>
+          </section>
 
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Applications</h2>
-        <div className="space-y-3">
-          {c.applications.map((a: any) => (
-            <Card key={a.id}>
-              <CardContent className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link to="/jobs/$jobId" params={{ jobId: a.job.id }} className="font-medium hover:underline">{a.job.title}</Link>
-                  <span className="text-sm text-muted-foreground">— {a.job.company.name}</span>
-                  <StatusBadge status={a.stage} />
-                </div>
-                {a.interview ? (
-                  <div className="text-sm text-muted-foreground">
-                    <div>
-                      {a.interview.round} with {a.interview.interviewer.name} · {a.interview.status}
+          <section>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Applications</h2>
+            <div className="space-y-3">
+              {c.applications.map((a: any) => (
+                <div key={a.id} className="space-y-2 rounded-[1.5rem] bg-[var(--warm-tan)] p-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link to="/jobs/$jobId" params={{ jobId: a.job.id }} className="warm-heading text-lg hover:underline">{a.job.title}</Link>
+                    <span className="text-sm opacity-70">— {a.job.company.name}</span>
+                    <WarmBadge status={a.stage} />
+                  </div>
+                  {a.interview ? (
+                    <div className="text-sm opacity-80">
+                      <div className="capitalize">
+                        {a.interview.round.replace(/_/g, " ")} with {a.interview.interviewer.name} · {a.interview.status.replace(/_/g, " ")}
+                        {a.interview.feedback && (
+                          <>
+                            {" "}· score <span className="warm-heading text-base">{a.interview.feedback.overallScore}</span>{" "}
+                            ({a.interview.feedback.recommendation.replace(/_/g, " ")}){" "}
+                            <span className="rounded-full bg-[var(--warm-bg)] px-2 py-0.5 text-xs">{a.interview.feedback.source}</span>
+                          </>
+                        )}
+                      </div>
                       {a.interview.feedback && (
-                        <>
-                          {" "}· score <span className="font-semibold text-foreground">{a.interview.feedback.overallScore}</span>{" "}
-                          ({a.interview.feedback.recommendation.replace(/_/g, " ")}){" "}
-                          <Badge variant="outline" className="font-normal">{a.interview.feedback.source}</Badge>
-                        </>
+                        <ul className="mt-2 space-y-1">
+                          {a.interview.feedback.competencies.map((k: any) => (
+                            <li key={k.id}><span className="font-medium opacity-100 capitalize">{k.competency.replace(/_/g, " ")}</span>: {k.score} — {k.evidence}</li>
+                          ))}
+                        </ul>
                       )}
                     </div>
-                    {a.interview.feedback && (
-                      <ul className="mt-2 space-y-1">
-                        {a.interview.feedback.competencies.map((k: any) => (
-                          <li key={k.id}><span className="font-medium text-foreground">{k.competency}</span>: {k.score} — {k.evidence}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : <div className="text-sm text-muted-foreground">No interview yet</div>}
-              </CardContent>
-            </Card>
-          ))}
+                  ) : <div className="text-sm opacity-70">No interview yet</div>}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Resume</h2>
+            <div className="rounded-[2rem] bg-[var(--warm-tan)] p-6">
+              <p className="text-sm text-[var(--warm-body)]">{c.resumeText}</p>
+            </div>
+          </section>
         </div>
-      </section>
 
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Resume</h2>
-        <p className="text-sm text-foreground/90">{c.resumeText}</p>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Recent activity</h2>
-        <ul className="space-y-1.5 text-sm">
-          {c.activities.map((a: any) => (
-            <li key={a.id}><span className="text-muted-foreground">{date(a.occurredAt)}</span> {a.type}: {a.body}</li>
-          ))}
-        </ul>
-      </section>
+        <section className="lg:sticky lg:top-20 lg:self-start">
+          <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Recent activity</h2>
+          <ul className="space-y-4 border-l border-[var(--warm-border)] pl-4">
+            {c.activities.map((a: any) => (
+              <li key={a.id} className="relative text-sm">
+                <span className="absolute top-1.5 -left-[1.15rem] size-2 rounded-full bg-[var(--warm-rust)]" />
+                <div className="opacity-60">{date(a.occurredAt)}</div>
+                <div><span className="font-medium capitalize">{a.type.replace(/_/g, " ")}</span>: {a.body}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
     </div>
   );
 }
@@ -447,36 +635,45 @@ function InterviewDetail() {
   const { data: i } = useQuery({ queryKey: ["interview", interviewId], queryFn: () => api<any>(`/api/interviews/${interviewId}`) });
   if (!i) return <Loading />;
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title={`${i.application.candidate.firstName} ${i.application.candidate.lastName} — ${i.round}`}
-        subtitle={`${i.application.job.title} · ${i.interviewer.name} · ${date(i.completedAt ?? i.scheduledAt)} · ${i.status}`}
-      />
+    <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+      <div className="space-y-1">
+        <h1 className="warm-heading text-4xl sm:text-5xl capitalize">
+          {i.application.candidate.firstName} {i.application.candidate.lastName} — {i.round.replace(/_/g, " ")}
+        </h1>
+        <p className="flex flex-wrap items-center gap-2 text-sm opacity-70">
+          {i.application.job.title} · {i.interviewer.name} · {date(i.completedAt ?? i.scheduledAt)} <WarmBadge status={i.status} />
+        </p>
+      </div>
+
       {i.feedback ? (
-        <>
+        <div className="space-y-8">
+          <div className="flex flex-wrap items-center gap-6 rounded-[2rem] bg-[var(--warm-tan)] p-6">
+            <ScoreRing value={i.feedback.overallScore} />
+            <div className="space-y-2">
+              <h2 className="warm-heading text-2xl capitalize">{i.feedback.recommendation.replace(/_/g, " ")}</h2>
+              <RecommendationScale value={i.feedback.recommendation} />
+              <p className="text-xs opacity-60">raw {i.feedback.scoreRaw.toFixed(1)} · scored by {i.feedback.source}</p>
+            </div>
+          </div>
+
           <section>
-            <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Score</h2>
-            <p className="flex flex-wrap items-baseline gap-2">
-              <span className="text-3xl font-semibold tabular-nums">{i.feedback.overallScore}</span>
-              <span className="text-sm text-muted-foreground">
-                raw {i.feedback.scoreRaw.toFixed(1)} · {i.feedback.recommendation.replace(/_/g, " ")} · scored by {i.feedback.source}
-              </span>
-            </p>
-          </section>
-          <section>
-            <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Competencies</h2>
-            <ul className="space-y-1.5 text-sm">
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Competencies</h2>
+            <div className="space-y-5">
               {i.feedback.competencies.map((c: any) => (
-                <li key={c.id}><span className="font-semibold">{c.competency} {c.score}</span> — {c.evidence}</li>
+                <CompetencyBar key={c.id} label={c.competency} score={c.score} evidence={c.evidence} />
               ))}
-            </ul>
+            </div>
           </section>
+
           <section>
-            <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Notes</h2>
-            <p className="text-sm text-foreground/90">{i.feedback.notes}</p>
+            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Notes</h2>
+            <div className="space-y-2 rounded-[2rem] bg-[var(--warm-tan)] p-6">
+              <p className="text-sm text-[var(--warm-body)]">{i.feedback.notes}</p>
+              <p className="text-xs opacity-60">{i.interviewer.name} · {date(i.completedAt ?? i.scheduledAt)}</p>
+            </div>
           </section>
-        </>
-      ) : <p className="text-sm text-muted-foreground">No feedback — this interview is {i.status}.</p>}
+        </div>
+      ) : <p className="text-sm opacity-70">No feedback — this interview is {i.status.replace(/_/g, " ")}.</p>}
     </div>
   );
 }

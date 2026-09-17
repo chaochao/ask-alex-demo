@@ -140,3 +140,34 @@
 @keyframes page-fade-in {
   from { opacity: 0; transform: translateY(4px); }
 }
+
+/* Warm palette, scoped to pages redesigned to match Hiring Platform.html — the job detail page
+   is first. Values are extracted via getComputedStyle from that reference, not eyeballed.
+   Scoped under .warm-theme rather than added to the shared shadcn tokens above so it doesn't
+   change any page that hasn't been redesigned yet. */
+.warm-theme {
+  --warm-bg: #f5ead8;
+  --warm-ink: #201e1d;
+  --warm-body: #2e2b25;
+  --warm-border: rgba(32, 30, 29, 0.16);
+  --warm-tan: #ebddc5;
+  --warm-mint: #e1eecc;
+  --warm-mint-ink: #3d472b;
+  --warm-rust: #c67139;
+  --warm-rust-dark: #8c491a;
+  --warm-cream-badge: #f9f4ed;
+  --warm-badge-ink: #474238;
+  /* Not from the reference (it only showed a job page) — picked to read as "good" against tan
+     without leaving the warm palette's hue family, for the competency-bar score threshold. */
+  --warm-good: #6b8f47;
+  font-family: Figtree, system-ui, sans-serif;
+  color: var(--warm-ink);
+}
+.warm-theme .warm-heading {
+  font-family: Newsreader, Georgia, serif;
+  font-weight: 500;
+}
+.warm-theme .warm-display {
+  font-family: Caprasimo, system-ui, sans-serif;
+  font-weight: 400;
+}
