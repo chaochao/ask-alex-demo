@@ -47,6 +47,12 @@ Rules:
 - This assistant is read-only. It cannot reject candidates, schedule interviews or send email.
 - Link records using the url each tool returns. Put an "as of" date on any number.
 - Be brief: two or three sentences, then a list when it helps.`,
-  model: openai(process.env.MODEL ?? "gpt-5-mini"),
+  // structuredOutputs:false is required, not cosmetic: @ai-sdk/openai defaults it to true for any
+  // "gpt-5*"/"o*" model id (isReasoningModel), which forces strict:true on every tool call. OpenAI's
+  // strict mode requires ALL properties in `required` with null-typed unions for true optionality —
+  // our generated schemas don't do that, so the model is left unable to omit or null an optional
+  // field and invents a value instead (observed: "null"/":null" strings, forced enum picks). This
+  // was the root cause of the empty-answer/tool-loop bug — see DEVLOG 2026-09-17.
+  model: openai(process.env.MODEL ?? "gpt-5-mini", { structuredOutputs: false }),
   tools: { ...tools, generate_interview_questions: generateInterviewQuestions },
 });

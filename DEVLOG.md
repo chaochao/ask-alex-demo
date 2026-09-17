@@ -3,6 +3,93 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-17 — root cause of the empty-answer bug, actually fixed this time
+
+Added debug logging (`ASK_ALEX_DEBUG=0` to silence): `routes/ask.ts` now `console.log`s the
+inbound message/pageContext, the full message array sent to the agent, every tool call's args,
+every tool result, the final answer, and any thrown error — all prefixed `[ask <threadId>]`.
+
+**Root cause of the empty-answer/garbage-filter bug, fully traced this time** (previous entries
+found symptoms and a sanitizer; this is the actual mechanism). Traced through
+`node_modules/@ai-sdk/openai/dist/index.js`:
+- `supportsStructuredOutputs` defaults to `this.settings.structuredOutputs ?? isReasoningModel(modelId)`.
+- `isReasoningModel` = `modelId.startsWith("o") || modelId.startsWith("gpt-5")` — true for `gpt-5-mini`.
+- `ask-alex.ts` never set `structuredOutputs`, so it silently defaulted to `true` for this model,
+  which forces `strict: true` on every tool definition sent to OpenAI.
+- OpenAI's strict/structured-output mode requires every property in `required`, with true
+  optionality expressed as a `["type","null"]` union. Confirmed via `zod-to-json-schema` directly
+  on `queryMetrics.inputSchema`: our generated schema correctly omits optional fields from
+  `required` and never adds a null-type union — i.e. valid ordinary JSON Schema, not valid
+  strict-mode JSON Schema. `@ai-sdk/openai` passes this schema through unmodified and just adds
+  `strict: true` on top, without upgrading it.
+- Net effect: the model is contractually forced to supply a value for every optional field, with
+  no schema-legal way to represent "omit this" or "null" — so it invents one. This explains every
+  symptom collected tonight: `"null"`/`":null"` sentinel strings, `""` empty strings, and valid-but-
+  irrelevant enum picks (`stage: "applied"`, `round: "screen"`, `location: "sf"`) on questions that
+  named none of them. Empty/zero-row tool results triggered retries with cosmetically different but
+  equally-invented filters, exhausting steps without ever converging on a real answer.
+
+**Fix:** `openai(model, { structuredOutputs: false })` in `ask-alex.ts`, one line. Verified against
+the exact conversation that failed live (multi-turn: "how many apply" → "this week" → "for all
+stages for all time") — before the fix, that last turn sent `filters` with 6+ invented fields and
+`rows: []` forever; after the fix, the same turn sent `filters: {"jobId": "..."}` alone — nothing
+else — and returned the correct number (27) in one clean tool call. Reran the full eval suite:
+6/10 → 8/10 (varies run to run — `demographics-refusal` remains the known curly-quote harness
+false-fail; `avg-score` now returns a real, close-but-not-exact number instead of empty, a much
+smaller problem worth a separate look; `generate-questions` now flakes differently, see below).
+
+**New tradeoff, not free:** `generate_interview_questions`'s own internal call
+(`agent.generate(prompt, { output: schema })` in `generate-questions.ts`) reuses this same agent
+for *object* generation, which benefits from native structured-output/JSON mode — with
+`structuredOutputs: false` it falls back to prompted "tool"-mode object generation
+(`defaultObjectGenerationMode` returns `"tool"` when `!supportsStructuredOutputs`), which is less
+reliable. Observed one run failing outright ("No object generated: response did not match schema")
+and another succeeding cleanly — probabilistic, not deterministic. Not yet decided whether to give
+that internal call its own model instance with `structuredOutputs: true` restored, since it doesn't
+suffer the same optional-filter problem (its schema has few/no optional fields). Flagging as a
+decision point, not fixing preemptively.
+
+**Multi-turn memory was also never wired in production**, found via a live user screenshot before
+the above: `routes/ask.ts` called `agent.stream(context + message, ...)` with only the current
+message on every turn. `ChatMessage` rows were persisted per turn but never read back — write-only
+logging, not memory. Fixed: fetch prior `ChatMessage` rows for the thread and pass the full
+conversation as a `CoreMessage[]` array, same technique the eval runner already used. Confirmed
+working live: a "this week" follow-up correctly reused the metric and job from two turns earlier.
+
+## 2026-09-17 — multi-turn memory gap + root cause of the empty-answer bug, found
+
+**Multi-turn memory was never wired in production.** Reported by the user via a live screenshot:
+on a job page, asked "how many people apply for this job," got a real answer that asked for a date
+range; replied "all time"; got "I didn't get what you'd like shown... do you want a specific
+metric?" — the agent had completely forgotten its own question. Root cause: `routes/ask.ts` called
+`agent.stream(context + message, ...)` with only the current message on every turn. `ChatMessage`
+rows were being persisted per turn, but never read back — the DB history was write-only logging,
+not memory. Fixed: fetch prior `ChatMessage` rows for the thread and pass the full conversation as
+a `CoreMessage[]` array (same technique already used in the eval runner for scripted multi-turn).
+
+**Found the actual root cause of the empty-answer bug** (open since the earlier avg-score
+discovery), with real captured evidence this time — queried the persisted `toolCalls` JSON on the
+assistant message straight from the DB rather than guessing. The model sends a placeholder string
+for an optional field it means to leave unset — observed both `"null"` and `":null"` — instead of
+omitting the key. Every filter check in `queries.ts` was a truthy-string check (`if (f.company)`),
+so `company: ":null"` was treated as a real company name, resolved to zero matches, and hit the
+`return { rows: [], ... }` early-exit path. Empty rows made the model retry with slightly different
+garbage, repeatedly, until it exhausted its steps and returned empty text. This is the same
+trust-boundary class of bug as the earlier `resolveWindow` date-string crash, just on string filters
+instead of dates. Fixed: a `clean()` helper in `queries.ts` treats `"null"`/`":null"`/`"none"`/
+`"n/a"` (case-insensitive) as absent, applied to every free-text filter (`company`, `jobTitle`,
+`jobId`, `source`, `recruiterId`) in both `runEntityQuery` and `runMetric`. Verified directly
+against the exact captured garbage payload — now returns a real row instead of `rows: []`.
+
+**Not fully solved:** the model was also filling enum-typed optional fields (`stage`, `round`,
+`location`, a relative `window`) with arbitrary-but-valid values for a question that shouldn't
+have been filtered by any of them ("how many applied to this job" got `stage: applied`,
+`round: screen`, `location: remote`, `window: today` — an almost self-contradictory combination
+that returns 0 regardless of the real count). The sentinel-string fix stops the infinite-retry/
+empty-answer crash, but a wrong, over-narrow answer is still possible from this same "fill every
+slot" tendency. Still suspect this traces back to how zod `.optional()` fields compile to JSON
+schema for this model/SDK combination — not yet investigated further.
+
 ## 2026-09-17 — real bug fixes: tool args, job-title resolution, retry wrapper
 
 **Confirmed and fixed a blocking runtime bug**, not just a type error: every tool's `execute`

@@ -16,27 +16,43 @@ ask.post("/api/ask", (c) =>
     const thread = threadId
       ? await db.chatThread.findUnique({ where: { id: threadId } })
       : await db.chatThread.create({ data: { title: message.slice(0, 60) } });
+
+    // Prior turns, fetched before inserting this one — otherwise the model has no memory of
+    // its own previous question and treats a follow-up like "all time" as a cold, unrelated message.
+    const priorMessages = threadId
+      ? (await db.chatMessage.findMany({ where: { threadId: thread!.id }, orderBy: { createdAt: "asc" } }))
+          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+      : [];
     await db.chatMessage.create({ data: { threadId: thread!.id, role: "user", content: message } });
 
     const context = pageContext?.entityId
       ? `Page context: entityType=${pageContext.entityType} entityId=${pageContext.entityId}. ` +
         `Resolve "this job"/"this candidate"/"this interview" (or an implicit subject) to it, per the page-context rule in your instructions.\n\n`
       : "";
+    const messages = [...priorMessages, { role: "user" as const, content: context + message }];
+
+    // Debug log: the whole request, and every tool call/result, to stdout — set ASK_ALEX_DEBUG=0 to quiet it.
+    const debug = process.env.ASK_ALEX_DEBUG !== "0";
+    const log = (...args: unknown[]) => { if (debug) console.log(`[ask ${thread!.id}]`, ...args); };
+    log("message:", message, "pageContext:", pageContext);
+    log("messages sent to agent:", JSON.stringify(messages));
 
     const agent = mastra.getAgent("askAlex");
     const toolCalls: unknown[] = [];
     let text = "";
 
     try {
-      const result = await agent.stream(context + message, {
+      const result = await agent.stream(messages, {
         abortSignal: c.req.raw.signal,
         onStepFinish: async (step: any) => {
           for (const call of step?.toolCalls ?? []) {
             toolCalls.push({ tool: call.toolName, args: call.args });
+            log("tool-call", call.toolName, JSON.stringify(call.args));
             await stream.writeSSE({ event: "tool-call", data: JSON.stringify({ tool: call.toolName, args: call.args }) });
           }
           for (const r of step?.toolResults ?? []) {
             const rows = Array.isArray((r as any).result?.rows) ? (r as any).result.rows.length : undefined;
+            log("tool-result", (r as any).toolName, JSON.stringify((r as any).result).slice(0, 1000));
             await stream.writeSSE({ event: "tool-result", data: JSON.stringify({ tool: (r as any).toolName, rows }) });
           }
         },
@@ -49,10 +65,13 @@ ask.post("/api/ask", (c) =>
       // Safety net: a tool-call loop can exhaust its steps without ever emitting text.
       // Never send an empty response — the underlying loop is a separate, open bug (see DEVLOG).
       if (!text.trim()) {
+        log("EMPTY final text — tool loop did not converge");
         text = "I wasn't able to put together an answer for that — could you narrow it to a specific job, company, or date range and ask again?";
         await stream.writeSSE({ event: "token", data: JSON.stringify({ t: text }) });
       }
+      log("final answer:", text);
     } catch (err) {
+      log("ERROR:", (err as Error).message);
       await stream.writeSSE({ event: "error", data: JSON.stringify({ message: (err as Error).message }) });
     }
 

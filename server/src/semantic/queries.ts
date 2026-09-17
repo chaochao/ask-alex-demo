@@ -4,6 +4,13 @@ import { METRICS, LOCATION_ALIASES, type Dimension, type LocationKey, type Metri
 export const db = new PrismaClient();
 export const asOf = () => new Date().toISOString();
 
+// The model sends a placeholder string for an optional field it means to leave unset (observed:
+// "null", ":null") instead of omitting the key. A truthy-string check treats that as a real value —
+// e.g. company: ":null" resolves to zero companies and silently empties every result. Same trust-
+// boundary reasoning as resolveWindow's date guard: never let a model-supplied placeholder act as data.
+const NULLISH = /^:?\s*(null|none|n\/a|undefined)\s*$/i;
+const clean = (s?: string) => (s && !NULLISH.test(s.trim())) ? s : undefined;
+
 export type Window = { field?: "interview_completed" | "interview_scheduled" | "applied" | "offer_extended";
   relative?: "today" | "this_week" | "last_week" | "last_7_days" | "last_14_days" | "last_30_days" | "quarter_to_date";
   from?: string; to?: string };
@@ -73,26 +80,29 @@ export async function runEntityQuery(input: {
   let resolvedCompany: string | null = null;
   let resolvedCompanyId: string | undefined;
 
-  if (f.company) {
-    const matches = await companyIdFromName(f.company);
+  const company = clean(f.company), jobTitle = clean(f.jobTitle), jobId = clean(f.jobId),
+        source = clean(f.source), recruiterId = clean(f.recruiterId);
+
+  if (company) {
+    const matches = await companyIdFromName(company);
     if (matches.length === 0) return { rows: [], total: 0, resolved: { company: null, window: win, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
     if (matches.length > 1) return { rows: [], total: 0, resolved: { company: null, window: win, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((m) => m.name) } };
     resolvedCompany = matches[0].name;
     resolvedCompanyId = matches[0].id;
     where.push("j.companyId = ?"); params.push(matches[0].id);
   }
-  if (f.jobTitle) {
-    const matches = await jobIdFromTitle(f.jobTitle, resolvedCompanyId);
+  if (jobTitle) {
+    const matches = await jobIdFromTitle(jobTitle, resolvedCompanyId);
     if (matches.length === 0) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: win, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
     if (matches.length > 1) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: win, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((j) => `${j.title} @ ${j.company.name}`) } };
     where.push("a.jobId = ?"); params.push(matches[0].id);
   }
-  if (f.jobId)      { where.push("a.jobId = ?");             params.push(f.jobId); }
+  if (jobId)        { where.push("a.jobId = ?");             params.push(jobId); }
   if (f.roleFamily) { where.push("j.roleFamily = ?");        params.push(f.roleFamily); }
   if (f.stage)      { where.push("a.stage = ?");             params.push(f.stage); }
   if (f.round)      { where.push("i.round = ?");             params.push(f.round); }
-  if (f.source)     { where.push("c.source = ?");            params.push(f.source); }
-  if (f.recruiterId){ where.push("a.ownerId = ?");           params.push(f.recruiterId); }
+  if (source)       { where.push("c.source = ?");            params.push(source); }
+  if (recruiterId)  { where.push("a.ownerId = ?");           params.push(recruiterId); }
   if (f.minScore)   { where.push("f.scoreRaw >= ?");         params.push(f.minScore); }
   if (f.location)   { where.push("c.location LIKE ?");       params.push(`%${LOCATION_ALIASES[f.location]}%`); }
   where.push("a.status = 'active' OR a.status = 'hired'");
@@ -183,20 +193,22 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   const win = resolveWindow(window);
   const dim = dimensions[0] ? DIM_SQL[dimensions[0]] : "NULL";
   const where: string[] = []; const params: unknown[] = [];
-  if (filters.jobId)      { where.push("a.jobId = ?");      params.push(filters.jobId); }
-  if (filters.roleFamily) { where.push("j.roleFamily = ?"); params.push(filters.roleFamily); }
-  if (filters.stage)      { where.push("a.stage = ?");      params.push(filters.stage); }
-  if (filters.source)     { where.push("c.source = ?");     params.push(filters.source); }
-  if (filters.location)   { where.push("c.location LIKE ?"); params.push(`%${LOCATION_ALIASES[filters.location]}%`); }
+  const jobId = clean(filters.jobId), source = clean(filters.source),
+        company = clean(filters.company), jobTitle = clean(filters.jobTitle);
+  if (jobId)               { where.push("a.jobId = ?");      params.push(jobId); }
+  if (filters.roleFamily)  { where.push("j.roleFamily = ?"); params.push(filters.roleFamily); }
+  if (filters.stage)       { where.push("a.stage = ?");      params.push(filters.stage); }
+  if (source)              { where.push("c.source = ?");     params.push(source); }
+  if (filters.location)    { where.push("c.location LIKE ?"); params.push(`%${LOCATION_ALIASES[filters.location]}%`); }
   let resolvedCompanyId: string | undefined;
-  if (filters.company) {
-    const m = await companyIdFromName(filters.company);
+  if (company) {
+    const m = await companyIdFromName(company);
     if (m.length !== 1) return { metric, definition: METRICS[metric].definition, asOf: asOf(), rows: [], ambiguous: m.map((x) => x.name) };
     resolvedCompanyId = m[0].id;
     where.push("j.companyId = ?"); params.push(m[0].id);
   }
-  if (filters.jobTitle) {
-    const m = await jobIdFromTitle(filters.jobTitle, resolvedCompanyId);
+  if (jobTitle) {
+    const m = await jobIdFromTitle(jobTitle, resolvedCompanyId);
     if (m.length !== 1) return { metric, definition: METRICS[metric].definition, asOf: asOf(), rows: [], ambiguous: m.map((j) => `${j.title} @ ${j.company.name}`) };
     where.push("a.jobId = ?"); params.push(m[0].id);
   }
