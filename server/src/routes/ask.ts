@@ -19,7 +19,8 @@ ask.post("/api/ask", (c) =>
     await db.chatMessage.create({ data: { threadId: thread!.id, role: "user", content: message } });
 
     const context = pageContext?.entityId
-      ? `The user is currently viewing ${pageContext.entityType} ${pageContext.entityId}. Resolve "this role"/"this candidate" to it.\n\n`
+      ? `Page context: entityType=${pageContext.entityType} entityId=${pageContext.entityId}. ` +
+        `Resolve "this job"/"this candidate"/"this interview" (or an implicit subject) to it, per the page-context rule in your instructions.\n\n`
       : "";
 
     const agent = mastra.getAgent("askAlex");
@@ -44,6 +45,12 @@ ask.post("/api/ask", (c) =>
       for await (const chunk of (result as any).textStream) {
         text += chunk;
         await stream.writeSSE({ event: "token", data: JSON.stringify({ t: chunk }) });
+      }
+      // Safety net: a tool-call loop can exhaust its steps without ever emitting text.
+      // Never send an empty response — the underlying loop is a separate, open bug (see DEVLOG).
+      if (!text.trim()) {
+        text = "I wasn't able to put together an answer for that — could you narrow it to a specific job, company, or date range and ask again?";
+        await stream.writeSSE({ event: "token", data: JSON.stringify({ t: text }) });
       }
     } catch (err) {
       await stream.writeSSE({ event: "error", data: JSON.stringify({ message: (err as Error).message }) });

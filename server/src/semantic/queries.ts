@@ -1,30 +1,42 @@
 import { PrismaClient } from "@prisma/client";
-import { METRICS, type Dimension, type MetricName } from "./metrics.js";
+import { METRICS, LOCATION_ALIASES, type Dimension, type LocationKey, type MetricName } from "./metrics.js";
 
 export const db = new PrismaClient();
 export const asOf = () => new Date().toISOString();
 
 export type Window = { field?: "interview_completed" | "interview_scheduled" | "applied" | "offer_extended";
-  relative?: "last_7_days" | "last_14_days" | "last_30_days" | "quarter_to_date"; from?: string; to?: string };
+  relative?: "today" | "this_week" | "last_week" | "last_7_days" | "last_14_days" | "last_30_days" | "quarter_to_date";
+  from?: string; to?: string };
+
+const startOfUTCDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+// Calendar week starts Monday, per TIMEZONE = UTC in metrics.ts.
+const startOfUTCWeek = (d: Date) => { const start = startOfUTCDay(d); start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7)); return start; };
 
 /** Dates are resolved in code, never by the model. Half-open [from, to). */
 export function resolveWindow(w?: Window) {
   if (!w) return null;
+  // The model is untrusted input here: it has sent the literal string "null" for an
+  // optional field before. Never let a bad date string reach toISOString() and throw.
+  const parseDate = (s?: string) => { if (!s) return undefined; const d = new Date(s); return isNaN(d.getTime()) ? undefined : d; };
   const now = new Date();
-  const to = w.to ? new Date(w.to) : now;
-  let from: Date;
-  if (w.from) from = new Date(w.from);
-  else if (w.relative === "last_7_days") from = new Date(to.getTime() - 7 * 864e5);
-  else if (w.relative === "last_14_days") from = new Date(to.getTime() - 14 * 864e5);
-  else if (w.relative === "last_30_days") from = new Date(to.getTime() - 30 * 864e5);
-  else if (w.relative === "quarter_to_date") from = new Date(Date.UTC(to.getUTCFullYear(), Math.floor(to.getUTCMonth() / 3) * 3, 1));
-  else return null;
+  let to = parseDate(w.to) ?? now;
+  let from = parseDate(w.from);
+  if (!from) {
+    if (w.relative === "today") from = startOfUTCDay(to);
+    else if (w.relative === "this_week") from = startOfUTCWeek(to);
+    else if (w.relative === "last_week") { to = startOfUTCWeek(to); from = new Date(to.getTime() - 7 * 864e5); }
+    else if (w.relative === "last_7_days") from = new Date(to.getTime() - 7 * 864e5);
+    else if (w.relative === "last_14_days") from = new Date(to.getTime() - 14 * 864e5);
+    else if (w.relative === "last_30_days") from = new Date(to.getTime() - 30 * 864e5);
+    else if (w.relative === "quarter_to_date") from = new Date(Date.UTC(to.getUTCFullYear(), Math.floor(to.getUTCMonth() / 3) * 3, 1));
+    else return null;
+  }
   return { from: from.toISOString(), to: to.toISOString(), field: w.field ?? "interview_completed" };
 }
 
 export type Filters = {
-  company?: string; roleFamily?: string; jobId?: string; stage?: string; round?: string;
-  interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string;
+  company?: string; roleFamily?: string; jobId?: string; jobTitle?: string; stage?: string; round?: string;
+  interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string; location?: LocationKey;
 };
 
 async function companyIdFromName(name: string) {
@@ -32,6 +44,18 @@ async function companyIdFromName(name: string) {
   const exact = await db.company.findFirst({ where: { OR: [{ id: name }, { slug }] } });
   if (exact) return [exact];
   return db.company.findMany({ where: { name: { contains: name.split(" ")[0] } } });
+}
+
+// Resolves a job named by title (never by the model guessing an id), scoped to a company
+// when one is already resolved. Matches per significant word, same reasoning as search_entities:
+// a title filter like "Staff Backend Engineer role" must not require the whole phrase to match.
+async function jobIdFromTitle(title: string, companyId?: string) {
+  const words = title.trim().split(/\s+/).filter((w) => w.length >= 3);
+  const terms = words.length ? words : [title];
+  return db.job.findMany({
+    where: { AND: terms.map((t) => ({ title: { contains: t } })), ...(companyId ? { companyId } : {}) },
+    include: { company: true },
+  });
 }
 
 const STAGE_RANK = `CASE a.stage WHEN 'offer' THEN 4 WHEN 'interviewing' THEN 3 WHEN 'screening' THEN 2 ELSE 1 END`;
@@ -47,13 +71,21 @@ export async function runEntityQuery(input: {
   const where: string[] = [];
   const params: unknown[] = [];
   let resolvedCompany: string | null = null;
+  let resolvedCompanyId: string | undefined;
 
   if (f.company) {
     const matches = await companyIdFromName(f.company);
     if (matches.length === 0) return { rows: [], total: 0, resolved: { company: null, window: win, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
     if (matches.length > 1) return { rows: [], total: 0, resolved: { company: null, window: win, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((m) => m.name) } };
     resolvedCompany = matches[0].name;
+    resolvedCompanyId = matches[0].id;
     where.push("j.companyId = ?"); params.push(matches[0].id);
+  }
+  if (f.jobTitle) {
+    const matches = await jobIdFromTitle(f.jobTitle, resolvedCompanyId);
+    if (matches.length === 0) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: win, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
+    if (matches.length > 1) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: win, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((j) => `${j.title} @ ${j.company.name}`) } };
+    where.push("a.jobId = ?"); params.push(matches[0].id);
   }
   if (f.jobId)      { where.push("a.jobId = ?");             params.push(f.jobId); }
   if (f.roleFamily) { where.push("j.roleFamily = ?");        params.push(f.roleFamily); }
@@ -62,6 +94,7 @@ export async function runEntityQuery(input: {
   if (f.source)     { where.push("c.source = ?");            params.push(f.source); }
   if (f.recruiterId){ where.push("a.ownerId = ?");           params.push(f.recruiterId); }
   if (f.minScore)   { where.push("f.scoreRaw >= ?");         params.push(f.minScore); }
+  if (f.location)   { where.push("c.location LIKE ?");       params.push(`%${LOCATION_ALIASES[f.location]}%`); }
   where.push("a.status = 'active' OR a.status = 'hired'");
 
   const needsScore = ["strength", "score", "most_recent_interview"].includes(input.sort.by);
@@ -154,10 +187,18 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   if (filters.roleFamily) { where.push("j.roleFamily = ?"); params.push(filters.roleFamily); }
   if (filters.stage)      { where.push("a.stage = ?");      params.push(filters.stage); }
   if (filters.source)     { where.push("c.source = ?");     params.push(filters.source); }
+  if (filters.location)   { where.push("c.location LIKE ?"); params.push(`%${LOCATION_ALIASES[filters.location]}%`); }
+  let resolvedCompanyId: string | undefined;
   if (filters.company) {
     const m = await companyIdFromName(filters.company);
     if (m.length !== 1) return { metric, definition: METRICS[metric].definition, asOf: asOf(), rows: [], ambiguous: m.map((x) => x.name) };
+    resolvedCompanyId = m[0].id;
     where.push("j.companyId = ?"); params.push(m[0].id);
+  }
+  if (filters.jobTitle) {
+    const m = await jobIdFromTitle(filters.jobTitle, resolvedCompanyId);
+    if (m.length !== 1) return { metric, definition: METRICS[metric].definition, asOf: asOf(), rows: [], ambiguous: m.map((j) => `${j.title} @ ${j.company.name}`) };
+    where.push("a.jobId = ?"); params.push(m[0].id);
   }
 
   const base = `

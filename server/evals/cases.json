@@ -1,11 +1,11 @@
 [
   { "id": "funnel-by-stage", "question": "How many candidates are in each stage for the Staff Backend Engineer role?",
     "expect": { "tools": ["query_metrics"], "metric": "funnel_by_stage" } },
-  { "id": "top-candidates-job", "question": "Who are the top candidates for the Staff Backend Engineer role?",
+  { "id": "top-candidates-job", "turns": ["Who are the top candidates for the Staff Backend Engineer role?", "Acme Robotics."],
     "expect": { "tools": ["query_entities"], "answerContains": ["stage"], "statesRankingRule": true } },
   { "id": "top-company-window", "question": "Top 10 candidates who interviewed for Software Engineer at Acme Robotics in the last 7 days",
     "expect": { "tools": ["query_entities"], "statesDateRange": true } },
-  { "id": "avg-score", "question": "What's the average interview score across all completed interviews?",
+  { "id": "avg-score", "turns": ["What's the average interview score across all completed interviews?", "All companies, all time."],
     "expect": { "tools": ["query_metrics"], "metric": "avg_score", "numberFromSql": "SELECT ROUND(AVG(scoreRaw),2) AS v FROM Feedback", "tolerance": 0.05 } },
   { "id": "pass-rate-by-round", "question": "What's our pass rate by interview round?",
     "expect": { "tools": ["query_metrics"], "metric": "pass_rate" } },

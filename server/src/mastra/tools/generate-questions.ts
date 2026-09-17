@@ -33,7 +33,7 @@ export const generateInterviewQuestions = createTool({
     jobId: z.string(), generationId: z.string(),
     questions: z.array(questionSchema), droppedCount: z.number(),
   }),
-  execute: async ({ jobId, count, mix, difficulty, candidateId, persist }, ctx: any) => {
+  execute: async ({ context: { jobId, count, mix, difficulty, candidateId, persist }, mastra }) => {
     const job = await db.job.findUnique({ where: { id: jobId }, include: { skills: { include: { skill: true } }, company: true } });
     if (!job) throw new Error(`job ${jobId} not found`);
 
@@ -67,7 +67,8 @@ export const generateInterviewQuestions = createTool({
     ].join("\n");
 
     // The agent itself generates structured output; see routes/ask.ts for how this is wired.
-    const agent = ctx?.mastra?.getAgent?.("askAlex") ?? ctx?.agent;
+    const agent = mastra?.getAgent("askAlex");
+    if (!agent) throw new Error("askAlex agent not available on tool context");
     const result = await agent.generate(prompt, { output: z.object({ questions: z.array(questionSchema) }) });
     const raw: z.infer<typeof questionSchema>[] = (result as any).object?.questions ?? [];
 

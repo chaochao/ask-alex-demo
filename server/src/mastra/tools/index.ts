@@ -3,21 +3,23 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { db, runEntityQuery, runMetric, pipelineBuckets, asOf } from "../../semantic/queries.js";
-import { METRIC_NAMES, DIMENSIONS, METRICS } from "../../semantic/metrics.js";
+import { METRIC_NAMES, DIMENSIONS, METRICS, LOCATION_KEYS } from "../../semantic/metrics.js";
 
 const filters = z.object({
   company: z.string().optional(),
   roleFamily: z.enum(["software_engineer","data_engineer","product_manager","designer"]).optional(),
   jobId: z.string().optional(),
+  jobTitle: z.string().optional(),
   stage: z.enum(["applied","screening","interviewing","offer","hired","rejected"]).optional(),
   round: z.enum(["screen","technical","hiring_manager","onsite"]).optional(),
   source: z.string().optional(),
   minScore: z.number().min(0).max(100).optional(),
+  location: z.enum(LOCATION_KEYS).optional(),
 }).optional();
 
 const windowSchema = z.object({
   field: z.enum(["interview_completed","interview_scheduled","applied","offer_extended"]).optional(),
-  relative: z.enum(["last_7_days","last_14_days","last_30_days","quarter_to_date"]).optional(),
+  relative: z.enum(["today","this_week","last_week","last_7_days","last_14_days","last_30_days","quarter_to_date"]).optional(),
   from: z.string().optional(), to: z.string().optional(),
 }).optional();
 
@@ -30,9 +32,15 @@ export const searchEntities = createTool({
     limit: z.number().int().min(1).max(20).default(5),
   }),
   outputSchema: z.object({ rows: z.array(z.object({ id: z.string(), label: z.string(), subtitle: z.string(), url: z.string() })) }),
-  execute: async ({ entity, query, limit }) => {
+  execute: async ({ context: { entity, query, limit } }) => {
     if (entity === "job") {
-      const rows = await db.job.findMany({ where: { title: { contains: query } }, include: { company: true }, take: limit });
+      // Match per significant word, not the whole phrase — a query like "Staff Backend
+      // Engineer job posting" must not require the title to contain that entire string.
+      const words = query.trim().split(/\s+/).filter((w) => w.length >= 3);
+      const terms = words.length ? words : [query];
+      const rows = await db.job.findMany({
+        where: { AND: terms.map((t) => ({ OR: [{ title: { contains: t } }, { company: { name: { contains: t } } }] })) },
+        include: { company: true }, take: limit });
       return { rows: rows.map((j) => ({ id: j.id, label: j.title, subtitle: `${j.company.name} · ${j.status}`, url: `/jobs/${j.id}` })) };
     }
     if (entity === "candidate") {
@@ -52,7 +60,7 @@ export const getEntity = createTool({
   description: "Load one record in detail: a candidate with their application and interview, a job with its pipeline, or an interview with its feedback.",
   inputSchema: z.object({ entity: z.enum(["candidate","job","interview"]), id: z.string() }),
   outputSchema: z.object({ entity: z.string(), url: z.string(), asOf: z.string(), data: z.any() }),
-  execute: async ({ entity, id }) => {
+  execute: async ({ context: { entity, id } }) => {
     if (entity === "candidate") {
       const c = await db.candidate.findUnique({ where: { id }, include: {
         skills: { include: { skill: true } },
@@ -67,7 +75,7 @@ export const getEntity = createTool({
     }
     const i = await db.interview.findUnique({ where: { id }, include: {
       interviewer: true, feedback: { include: { competencies: true } },
-      application: { include: { candidate: true, job: true } } } });
+      application: { include: { candidate: true, job: { include: { company: true } } } } } });
     return { entity, url: `/interviews/${id}`, asOf: asOf(), data: i };
   },
 });
@@ -85,7 +93,7 @@ export const queryMetrics = createTool({
     rows: z.array(z.object({ dimension: z.string().nullable(), value: z.number() })),
     ambiguous: z.array(z.string()),
   }),
-  execute: async ({ metric, dimensions, filters, window }) =>
+  execute: async ({ context: { metric, dimensions, filters, window } }) =>
     runMetric(metric as any, (dimensions ?? []) as any, filters ?? {}, window),
 });
 
@@ -107,12 +115,13 @@ export const queryEntities = createTool({
     resolved: z.object({ company: z.string().nullable(), window: z.any(), sortDefinition: z.string(), asOf: z.string(), ambiguous: z.array(z.string()) }),
     buckets: z.any().optional(),
   }),
-  execute: async (input) => {
-    const res = await runEntityQuery(input as any);
-    const buckets = input.filters?.jobId ? await pipelineBuckets(input.filters.jobId) : undefined;
+  execute: async ({ context }) => {
+    const res = await runEntityQuery(context as any);
+    const buckets = context.filters?.jobId ? await pipelineBuckets(context.filters.jobId) : undefined;
     return { ...res, buckets };
   },
 });
 
-export const tools = { searchEntities, getEntity, queryMetrics, queryEntities };
+// Keys must match each tool's `id` — Mastra reports tool calls by this object key, not by `id`.
+export const tools = { search_entities: searchEntities, get_entity: getEntity, query_metrics: queryMetrics, query_entities: queryEntities };
 export { METRICS };

@@ -27,3 +27,13 @@ export type Dimension = (typeof DIMENSIONS)[number];
 
 // Business time only. Day boundaries are UTC in the demo — stated, not implied.
 export const TIMEZONE = "UTC";
+
+// ponytail: substring match on Candidate.location, no geocoding — fixed alias list only,
+// won't catch "Bay Area" for Oakland. Upgrade to real geo if that gap matters later.
+export const LOCATION_ALIASES = {
+  sf: "San Francisco", san_francisco: "San Francisco", oakland: "Oakland",
+  seattle: "Seattle", austin: "Austin", nyc: "New York", new_york: "New York",
+  denver: "Denver", chicago: "Chicago", remote: "Remote",
+} as const;
+export type LocationKey = keyof typeof LOCATION_ALIASES;
+export const LOCATION_KEYS = Object.keys(LOCATION_ALIASES) as [LocationKey, ...LocationKey[]];

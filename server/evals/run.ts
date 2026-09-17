@@ -3,7 +3,7 @@ import { db } from "../src/semantic/queries.js";
 import cases from "./cases.json" with { type: "json" };
 
 type Case = {
-  id: string; question: string; pageContextEntity?: string;
+  id: string; question?: string; turns?: string[]; pageContextEntity?: string;
   expect: { tools?: string[]; metric?: string; behavior?: string; answerContains?: string[];
     numberFromSql?: string; tolerance?: number; countEquals?: number;
     statesRankingRule?: boolean; statesDateRange?: boolean };
@@ -13,20 +13,52 @@ const CLARIFY = /which|what (date|range|job|role|company)|could you|do you mean/
 const DECLINE = /don'?t (have|track)|not (available|something i)|can'?t answer|available metrics/i;
 const REFUSE  = /can'?t|cannot|won'?t|not able|read-only/i;
 
+// The API call intermittently 404s (confirmed transient — same call succeeds on retry with
+// no code change). Retry a couple of times with backoff before giving up.
+async function generateWithRetry(agent: any, messages: unknown, attempts = 3): Promise<any> {
+  for (let i = 0; i < attempts; i++) {
+    try { return await agent.generate(messages); }
+    catch (err) {
+      if (i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+    }
+  }
+}
+
 async function main() {
+  // Filter to one case: `npm run eval -- <case-id>` (or `tsx evals/run.ts <case-id>`).
+  const only = process.argv[2];
+  const selected = only ? (cases as Case[]).filter((c) => c.id === only) : (cases as Case[]);
+  if (only && selected.length === 0) {
+    console.error(`No case "${only}". Available: ${(cases as Case[]).map((c) => c.id).join(", ")}`);
+    process.exit(1);
+  }
+
   const agent = mastra.getAgent("askAlex");
   const model = process.env.MODEL ?? "openai/gpt-4.1-mini";
   const run = await db.evalRun.create({ data: { model, passed: 0, failed: 0 } });
   const job = await db.job.findFirst({ where: { title: { contains: "Staff Backend" } } });
   let passed = 0, failed = 0;
 
-  for (const c of cases as Case[]) {
+  for (const c of selected) {
     const started = Date.now();
     const failures: string[] = [];
     const prefix = c.pageContextEntity === "job" && job ? `The user is currently viewing job ${job.id}.\n\n` : "";
-    const res: any = await agent.generate(prefix + c.question);
-    const answer: string = res.text ?? "";
-    const used: string[] = (res.steps ?? []).flatMap((s: any) => (s.toolCalls ?? []).map((t: any) => t.toolName));
+    const turns = c.turns ?? [c.question!];
+
+    // Multi-round: replay the scripted conversation, grading only the final answer.
+    // Stateless — no Memory/threadId, just the accumulated message array (agent.generate
+    // accepts string | string[] | CoreMessage[]).
+    const messages: { role: "user" | "assistant"; content: string }[] = [];
+    let answer = "";
+    const used: string[] = [];
+    for (let i = 0; i < turns.length; i++) {
+      messages.push({ role: "user", content: i === 0 ? prefix + turns[i] : turns[i] });
+      const res: any = await generateWithRetry(agent, messages);
+      answer = res.text ?? "";
+      used.push(...(res.steps ?? []).flatMap((s: any) => (s.toolCalls ?? []).map((t: any) => t.toolName)));
+      messages.push({ role: "assistant", content: answer });
+    }
     const latencyMs = Date.now() - started;
 
     for (const t of c.expect.tools ?? []) if (!used.includes(t)) failures.push(`expected tool ${t}, used [${used.join(", ")}]`);
@@ -53,6 +85,7 @@ async function main() {
     await db.evalResult.create({ data: { runId: run.id, caseId: c.id, passed: ok,
       failures: JSON.stringify(failures), answer, toolsUsed: JSON.stringify(used), latencyMs } });
     console.log(`${ok ? "PASS" : "FAIL"}  ${c.id.padEnd(24)} ${latencyMs}ms  ${failures.join(" · ")}`);
+    if (!ok) console.log(`      answer: ${answer.replace(/\n+/g, " ")}`);
   }
 
   await db.evalRun.update({ where: { id: run.id }, data: { passed, failed } });
