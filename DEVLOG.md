@@ -3,6 +3,55 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-18 — sort-schema tool-call bug, candidate headcount gap, sidebar crash + redesign
+
+**Real, reproducible bug in `query_entities`'s tool schema**, found live via a user report ("top
+10 candidates for this job" returned "I wasn't able to put together an answer"). Traced with a
+standalone repro script calling `agent.stream()` directly and reading `fullStream`: the model
+correctly called `query_entities({ filters: { jobId }, limit: 10 })`, omitting `sort` entirely —
+reasonable, since every field inside `sort` has a `.default()`. But `.default()` on `by`/`dir`
+only fires once the `sort` *key* is present; the object itself had no default, so Zod rejected the
+call with `AI_InvalidToolArgumentsError: sort Required`. That error never reaches
+`onStepFinish` — the step just ends with `finishReason: "tool-calls"`, empty `toolCalls`, empty
+text, which is indistinguishable from "the model gave up." **This is a different bug from the
+`structuredOutputs`/empty-answer bug logged 2026-09-17** — same *symptom* (empty answer), unrelated
+cause. Fix: `.default({})` on the `sort` object itself (`tools/index.ts`). Lesson for future zod
+tool schemas here: an object where every field has a default still needs its own default, or
+omitting it entirely (which a non-strict model will do) fails closed and silently.
+
+**No way to answer "how many candidates have current title X."** Every existing metric/filter
+reached Candidate only by joining through Application — correct for application-shaped questions,
+wrong for a pure candidate fact. 23 of 120 seeded candidates have zero applications, so even a
+naive fix (add a `currentTitle` filter to the existing Application-joined query) would have
+silently dropped them. Added `candidates_count` (`metrics.ts`) with its own `countCandidates()`
+path in `queries.ts` that queries `Candidate` directly — first metric that doesn't go through
+Application at all. Also added `filters.currentTitle`, and one line each in `schema-guide.ts` and
+`ask-alex.ts` distinguishing it from `filters.jobTitle` (a Job's title, not a candidate's).
+
+**Sidebar crash, real and reproduced**: hitting "New thread" while a reply was still streaming
+reset `messages` to `[]`, but the in-flight `onFrame` callback kept firing and did
+`copy[copy.length - 1].text` — `copy[-1].text` on the now-empty array, throwing, with no error
+boundary, taking down the whole page (React's dev overlay, not just the sidebar). Fixed with an
+`AbortController` per request (aborted on reset) plus an empty-array guard in every `setMessages`
+updater as a second line of defense against the one chunk that's already in flight when abort
+fires.
+
+**Ask Alex sidebar redesign** (`Sidebar.tsx`): tool-call steps moved from a single array shared
+across the whole sidebar (wiped every `send()`, so a prior turn's steps vanished the moment a new
+one started) onto each message, correlated call→result by `toolCallId` into one pill with a
+running→done state instead of two separate badges per call. Added human labels
+(`TOOL_LABELS`) since raw function names like `query_entities` meant nothing to the user. Loading
+indicator went through three iterations per user feedback: static "…" → cycling word + bouncing
+dots → typewriter effect (letters typed in, blinking cursor, animated `...` once the word finishes,
+holds 5s) — worth remembering that "add an animation" requests here want the literal typing
+metaphor, not a generic spinner.
+
+`generate_interview_questions`'s `persist` default flipped `true` → `false`: chat-generated
+questions were being saved to the job on every ask, which the user explicitly didn't want —
+suggestions now stay suggestions unless persistence is asked for explicitly.
+
+Committed as two commits (`9eb2e8e` backend, `ffbbfdf` frontend), pushed to `origin/main`.
+
 ## 2026-09-17 — warm-theme UI redesign, all pages + pagination + rebrand
 
 Redesigned the whole web UI (`web/src/main.tsx`, `web/src/styles.css`, `web/index.html`) to match
