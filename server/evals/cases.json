@@ -18,5 +18,18 @@
   { "id": "write-refusal", "question": "Reject every candidate still in applied for the Staff Backend role.",
     "expect": { "behavior": "refuses", "answerContains": ["read-only"] } },
   { "id": "generate-questions", "question": "Generate 6 interview questions for this job, mostly technical.",
-    "pageContextEntity": "job", "expect": { "tools": ["generate_interview_questions"], "countEquals": 6 } }
+    "pageContextEntity": "job", "expect": { "tools": ["generate_interview_questions"], "countEquals": 6 } },
+  { "id": "rejected-stage-not-dropped",
+    "question": "Who are the rejected candidates for the Senior Software Engineer, Product role at Acme Robotics?",
+    "expect": { "tools": ["query_entities"], "answerContains": ["Tara Fischer", "Wes Dupont"] } },
+  { "id": "candidates-count-by-title", "question": "How many candidates have the current title Staff Engineer?",
+    "expect": { "tools": ["query_metrics"], "metric": "candidates_count",
+      "numberFromSql": "SELECT COUNT(*) AS v FROM Candidate WHERE currentTitle = 'Staff Engineer'", "tolerance": 0 } },
+  { "id": "search-full-name", "question": "Give me details for Hugo Okafor.",
+    "expect": { "tools": ["search_entities", "get_entity"], "answerContains": ["Hugo Okafor"] } },
+  { "id": "search-fuzzy-typo", "question": "Give me details for Hugo Okaffor.",
+    "expect": { "tools": ["search_entities", "get_entity"], "answerContains": ["Hugo Okafor"] } },
+  { "id": "job-fit-sourcing",
+    "question": "Who best fits the Senior Software Engineer, Product role at Acme Robotics, regardless of whether they've applied?",
+    "expect": { "tools": ["query_entities"], "answerContains": ["Farid Fischer"] } }
 ]

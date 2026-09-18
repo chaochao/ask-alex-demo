@@ -141,7 +141,9 @@ export const queryMetrics = createTool({
 
 export const queryEntities = createTool({
   id: "query_entities",
-  description: "Ranked list of records — 'top N', 'who', 'which', 'list'. Returns rows already ordered, plus the ranking definition used. Use query_metrics instead for counts and averages.",
+  description: "Ranked list of records — 'top N', 'who', 'which', 'list'. Returns rows already ordered, plus the ranking definition used. Use query_metrics instead for counts and averages. " +
+    "sort.by='job_fit' (needs filters.jobId or filters.jobTitle) ranks the entire candidate pool by skill match to that job's requirements — regardless of whether they've applied. Use it for " +
+    "'who fits this role' / sourcing questions; use the default 'strength' for 'top candidates for this role' among people already in the pipeline.",
   inputSchema: z.object({
     entity: z.enum(["candidate","job","interview","application"]).default("candidate"),
     filters, window: windowSchema,
@@ -152,7 +154,7 @@ export const queryEntities = createTool({
     // step ends with finishReason "tool-calls" but empty toolCalls/text — looks identical to a
     // model that gave up, not a rejected call.
     sort: z.object({
-      by: z.enum(["strength","score","most_recent_interview","years_experience","applied_at","stage_age","name"]).default("strength"),
+      by: z.enum(["strength","score","most_recent_interview","years_experience","applied_at","stage_age","name","job_fit"]).default("strength"),
       dir: z.enum(["asc","desc"]).default("desc"),
     }).default({}),
     limit: z.number().int().min(1).max(25).default(10),
@@ -165,7 +167,11 @@ export const queryEntities = createTool({
   }),
   execute: async ({ context }) => {
     const res = await runEntityQuery(context as any);
-    const buckets = context.filters?.jobId ? await pipelineBuckets(context.filters.jobId) : undefined;
+    // Pipeline buckets describe applicants; meaningless for job_fit, which ranks the whole
+    // candidate pool regardless of who's applied — attaching them there would just hand the
+    // model applicant-pipeline numbers to (mis)report against a pool-wide ranking.
+    const buckets = context.filters?.jobId && context.sort?.by !== "job_fit"
+      ? await pipelineBuckets(context.filters.jobId) : undefined;
     return { ...res, buckets };
   },
 });

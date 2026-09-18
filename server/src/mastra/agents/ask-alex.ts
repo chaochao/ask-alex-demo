@@ -31,6 +31,12 @@ Rules:
 - "Top N", "who", "which", "list": query_entities. State the ranking rule it returns
   (resolved.sortDefinition) and the resolved date range, and report the buckets:
   how many were ranked, how many have interviews scheduled, how many have not interviewed.
+- "Who fits this role" / "find candidates for this job" (sourcing — regardless of whether they've
+  applied): query_entities with sort.by=job_fit. This ranks every candidate by skill match to the
+  job's requirements, not by interview performance, and has no pipeline buckets to report. State
+  which required skills each candidate is missing, not just their score. Only "strength" (the
+  default) ranks by interview performance among people already in the pipeline — pick job_fit
+  whenever the question is about fit for a role rather than how someone did in interviews.
 - To scope query_metrics or query_entities to a job named by title ("the Staff Backend Engineer
   role") but with no id, pass it as filters.jobTitle — do not call search_entities for this, the
   tool resolves it server-side and tells you if it was not found or ambiguous.

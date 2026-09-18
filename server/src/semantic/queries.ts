@@ -68,11 +68,83 @@ async function jobIdFromTitle(title: string, companyId?: string) {
 
 const STAGE_RANK = `CASE a.stage WHEN 'offer' THEN 4 WHEN 'interviewing' THEN 3 WHEN 'screening' THEN 2 ELSE 1 END`;
 
+// Sourcing, not pipeline ranking: "who in the whole candidate pool fits this job" has nothing to
+// do with whether someone applied, so this queries Candidate directly (like countCandidates
+// above), never through Application — an applicant filter would just drop everyone recruiters
+// haven't found yet, which is the entire point of this sort.
+async function rankCandidatesByFit(f: Filters, limit: number) {
+  const company = clean(f.company), jobTitle = clean(f.jobTitle), jobId = clean(f.jobId);
+  let resolvedCompany: string | null = null, resolvedCompanyId: string | undefined, resolvedJobId = jobId;
+
+  if (company) {
+    const matches = await companyIdFromName(company);
+    if (matches.length !== 1) return { rows: [], total: 0, resolved: { company: null, window: null, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((m) => m.name) } };
+    resolvedCompany = matches[0].name; resolvedCompanyId = matches[0].id;
+  }
+  if (!resolvedJobId && jobTitle) {
+    const matches = await jobIdFromTitle(jobTitle, resolvedCompanyId);
+    if (matches.length !== 1) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: null, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((j) => `${j.title} @ ${j.company.name}`) } };
+    resolvedJobId = matches[0].id;
+  }
+  if (!resolvedJobId) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: null, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
+
+  const reqs = await db.jobSkill.findMany({ where: { jobId: resolvedJobId }, include: { skill: true } });
+  const sortDefinition = "required skills met (full credit if years meet the job's minimum, "
+    + "partial credit if under, weighted 3x), plus nice-to-have skills present (weighted 1x), "
+    + "as a percent of the maximum possible — independent of whether they've applied";
+  if (reqs.length === 0) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: null, sortDefinition, asOf: asOf(), ambiguous: [] as string[] } };
+
+  const possible = reqs.reduce((sum, r) => sum + (r.required ? 3 : 1), 0);
+  const scored = await db.$queryRawUnsafe<any[]>(`
+    SELECT c.id, c.firstName || ' ' || c.lastName AS label,
+      SUM(
+        CASE
+          WHEN js.required = 1 AND cs.skillId IS NULL THEN 0
+          WHEN js.required = 1 AND js.minYears IS NULL THEN 3.0
+          WHEN js.required = 1 THEN 3.0 * min(1.0, CAST(cs.years AS REAL) / js.minYears)
+          WHEN js.required = 0 AND cs.skillId IS NOT NULL THEN 1.0
+          ELSE 0
+        END
+      ) AS earned
+    FROM Candidate c
+    CROSS JOIN JobSkill js ON js.jobId = ?
+    LEFT JOIN CandidateSkill cs ON cs.candidateId = c.id AND cs.skillId = js.skillId
+    GROUP BY c.id
+    ORDER BY earned DESC
+    LIMIT ?`, resolvedJobId, limit);
+
+  const theirSkills = await db.candidateSkill.findMany({ where: { candidateId: { in: scored.map((r) => r.id) } } });
+  const has = new Map<string, Set<string>>();
+  for (const cs of theirSkills) {
+    if (!has.has(cs.candidateId)) has.set(cs.candidateId, new Set());
+    has.get(cs.candidateId)!.add(cs.skillId);
+  }
+
+  const total = await db.candidate.count();
+  return {
+    rows: scored.map((r) => {
+      const owned = has.get(r.id) ?? new Set<string>();
+      return {
+        id: r.id, label: r.label, url: `/candidates/${r.id}`,
+        sortValue: Math.round((100 * r.earned) / possible),
+        context: {
+          metRequired: reqs.filter((q) => q.required && owned.has(q.skillId)).map((q) => q.skill.name),
+          missingRequired: reqs.filter((q) => q.required && !owned.has(q.skillId)).map((q) => q.skill.name),
+          niceToHave: reqs.filter((q) => !q.required && owned.has(q.skillId)).map((q) => q.skill.name),
+        },
+      };
+    }),
+    total,
+    resolved: { company: resolvedCompany, window: null, sortDefinition, asOf: asOf(), ambiguous: [] as string[] },
+  };
+}
+
 /** Ranked list of records. Filters and sort keys are enum-bound; every value is parameterized. */
 export async function runEntityQuery(input: {
   entity: "candidate" | "job" | "interview" | "application";
   filters?: Filters; window?: Window; sort: { by: string; dir?: "asc" | "desc" }; limit?: number;
 }) {
+  if (input.sort.by === "job_fit") return rankCandidatesByFit(input.filters ?? {}, Math.min(input.limit ?? 10, 25));
   const f = input.filters ?? {};
   const win = resolveWindow(input.window);
   const limit = Math.min(input.limit ?? 10, 25);
@@ -106,12 +178,16 @@ export async function runEntityQuery(input: {
   if (recruiterId)  { where.push("a.ownerId = ?");           params.push(recruiterId); }
   if (f.minScore)   { where.push("f.scoreRaw >= ?");         params.push(f.minScore); }
   if (f.location)   { where.push("c.location LIKE ?");       params.push(`%${LOCATION_ALIASES[f.location]}%`); }
-  where.push("a.status = 'active' OR a.status = 'hired'");
+  // Default to active/hired only when the caller didn't already ask for a specific stage —
+  // an explicit stage:'rejected' filter must not be silently vetoed by this, since every
+  // rejected application has status='rejected', never 'active' or 'hired'.
+  if (!f.stage) where.push("a.status = 'active' OR a.status = 'hired'");
 
-  const needsScore = ["strength", "score", "most_recent_interview"].includes(input.sort.by);
-  const join = needsScore
-    ? `JOIN Interview i ON i.applicationId = a.id AND i.status = 'completed' JOIN Feedback f ON f.interviewId = i.id`
-    : `LEFT JOIN Interview i ON i.applicationId = a.id LEFT JOIN Feedback f ON f.interviewId = i.id`;
+  // Always LEFT JOIN — an inner join here would silently drop any application without a
+  // completed, scored interview (e.g. rejected before ever interviewing) from every ranked
+  // list, not just filter its score. SQLite sorts NULLs last under DESC, so f.scoreRaw DESC
+  // still ranks scored applications first without an inner join doing the exclusion instead.
+  const join = `LEFT JOIN Interview i ON i.applicationId = a.id LEFT JOIN Feedback f ON f.interviewId = i.id`;
 
   if (win) {
     const col = win.field === "interview_scheduled" ? "i.scheduledAt" : win.field === "applied" ? "a.appliedAt" : "i.completedAt";
