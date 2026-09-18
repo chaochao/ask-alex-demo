@@ -10,6 +10,18 @@ type Question = { text: string; category: string; rationale: string };
 type Step = { id: string; tool: string; status: "running" | "done"; rows?: number };
 type Msg = { role: "user" | "assistant"; text: string; questions?: Question[]; steps?: Step[] };
 
+// Tool results embed app-relative paths as plain text (e.g. "profile: /candidates/abc123") —
+// turn those into clickable links instead of leaving them as inert text the user has to copy.
+const APP_LINK_RE = /(\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+)/g;
+const IS_APP_LINK = /^\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+$/;
+function linkify(text: string) {
+  return text.split(APP_LINK_RE).map((part, i) =>
+    IS_APP_LINK.test(part)
+      ? <a key={i} href={part} className="underline underline-offset-2 hover:opacity-80">{part}</a>
+      : <span key={i}>{part}</span>
+  );
+}
+
 // What each tool is doing, in plain language — the raw function name means nothing to a user.
 const TOOL_LABELS: Record<string, string> = {
   search_entities: "Searching for a match",
@@ -223,7 +235,7 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
                   : "whitespace-pre-wrap text-foreground",
               )}
             >
-              {m.text || (live ? <TypingDots /> : "")}
+              {m.text ? linkify(m.text) : (live ? <TypingDots /> : "")}
               {m.questions && m.questions.length > 0 && (
                 <ol className="mt-3 list-none space-y-3">
                   {m.questions.map((q, qi) => (

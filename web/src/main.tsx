@@ -5,7 +5,7 @@ import {
   createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useParams, useRouterState,
 } from "@tanstack/react-router";
 import {
-  Briefcase, CalendarCheck2, ChevronLeft, ChevronRight, Handshake, Inbox, ListChecks, MessagesSquare,
+  Briefcase, CalendarCheck2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Handshake, Inbox, ListChecks, MessagesSquare,
   Settings as SettingsIcon, Sparkles, UserCheck, Users, XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -50,7 +50,7 @@ const WARM_BADGE_TONE: Record<string, string> = {
   screening: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   interviewing: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
   scheduled: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
-  completed: "bg-[var(--warm-mint)] text-[var(--warm-mint-ink)]",
+  completed: "bg-[var(--warm-rust)]/15 text-[var(--warm-rust-dark)]",
   rejected: "bg-[var(--warm-cream-badge)] text-[var(--warm-badge-ink)]",
   closed: "bg-[var(--warm-cream-badge)] text-[var(--warm-badge-ink)]",
   on_hold: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
@@ -231,6 +231,7 @@ function Jobs() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<(typeof JOB_STATUS_FILTERS)[number]>("all");
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<SortState<"title" | "company" | "status" | "applications" | "opened">>({ key: null, dir: "asc" });
 
   const totalApplications = data.reduce((sum, j) => sum + j._count.applications, 0);
   const openCount = data.filter((j) => j.status === "open").length;
@@ -239,8 +240,15 @@ function Jobs() {
   const filtered = data.filter((j) =>
     (statusFilter === "all" || j.status === statusFilter) &&
     (!q || j.title.toLowerCase().includes(q) || j.company.name.toLowerCase().includes(q)));
+  const sorted = sortRows(filtered, sort, {
+    title: (j) => j.title.toLowerCase(),
+    company: (j) => j.company.name.toLowerCase(),
+    status: (j) => j.status,
+    applications: (j) => j._count.applications,
+    opened: (j) => new Date(j.openedAt).getTime(),
+  });
   useEffect(() => setPage(0), [query, statusFilter]);
-  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
@@ -276,11 +284,11 @@ function Jobs() {
         <Table>
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Title</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Company</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Status</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Applications</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Opened</TableHead>
+              <SortableHead label="Title" sortKey="title" sort={sort} setSort={setSort} />
+              <SortableHead label="Company" sortKey="company" sort={sort} setSort={setSort} />
+              <SortableHead label="Status" sortKey="status" sort={sort} setSort={setSort} />
+              <SortableHead label="Applications" sortKey="applications" sort={sort} setSort={setSort} />
+              <SortableHead label="Opened" sortKey="opened" sort={sort} setSort={setSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -318,6 +326,37 @@ function StageStatCard({ stage, value }: { stage: string; value: number }) {
         </span>
       </CardContent>
     </Card>
+  );
+}
+
+type SortDir = "asc" | "desc";
+type SortState<K extends string> = { key: K | null; dir: SortDir };
+
+// key: null means "leave the API's default order alone" — only reorder once the user picks a column.
+function sortRows<T, K extends string>(rows: T[], sort: SortState<K>, extractors: Record<K, (row: T) => string | number>): T[] {
+  if (!sort.key) return rows;
+  const extract = extractors[sort.key];
+  const sorted = [...rows].sort((a, b) => {
+    const av = extract(a), bv = extract(b);
+    return typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+  });
+  return sort.dir === "asc" ? sorted : sorted.reverse();
+}
+
+function SortableHead<K extends string>({ label, sortKey, sort, setSort }: {
+  label: string; sortKey: K; sort: SortState<K>; setSort: (s: SortState<K>) => void;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <TableHead
+      className="cursor-pointer text-[var(--warm-ink)] opacity-60 select-none hover:opacity-100"
+      onClick={() => setSort({ key: sortKey, dir: active && sort.dir === "asc" ? "desc" : "asc" })}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active && (sort.dir === "asc" ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}
+      </span>
+    </TableHead>
   );
 }
 
@@ -386,6 +425,25 @@ function RecommendationScale({ value }: { value: string }) {
           {r.replace(/_/g, " ")}
         </span>
       ))}
+    </div>
+  );
+}
+
+// Candidate skills have years but no "required" baseline outside a specific job's requirements
+// (that comparison lives on the Job page, scoped to one role) — the bar length here is relative
+// to years of experience, capped at 12y (seed data's ~90th percentile), not a pass/fail threshold.
+const SKILL_YEARS_CAP = 12;
+function SkillBar({ name, years }: { name: string; years: number | null }) {
+  const pct = years ? Math.min(100, Math.round((years / SKILL_YEARS_CAP) * 100)) : 0;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="font-medium">{name}</span>
+        <span className="opacity-70">{years ? `${years}y` : "—"}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--warm-tan)]">
+        <div className="h-full rounded-full bg-[var(--warm-good)]" style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }
@@ -527,16 +585,30 @@ function Candidates() {
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<(typeof CANDIDATE_SOURCES)[number]>("all");
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<SortState<"name" | "title" | "years" | "source" | "applications" | "bestScore">>({ key: null, dir: "asc" });
 
   const activeCount = data.filter((c) => c.status === "active").length;
   const avgYears = data.length ? Math.round(data.reduce((sum, c) => sum + c.yearsExperience, 0) / data.length) : 0;
 
+  const withBest = data.map((c) => {
+    const scores = c.applications.map((a: any) => a.interview?.feedback?.overallScore).filter((s: unknown) => typeof s === "number");
+    return { ...c, best: scores.length ? Math.max(...scores) : null };
+  });
+
   const q = query.trim().toLowerCase();
-  const filtered = data.filter((c) =>
+  const filtered = withBest.filter((c) =>
     (sourceFilter === "all" || c.source === sourceFilter) &&
     (!q || `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) || (c.currentTitle ?? "").toLowerCase().includes(q)));
+  const sorted = sortRows(filtered, sort, {
+    name: (c) => `${c.firstName} ${c.lastName}`.toLowerCase(),
+    title: (c) => (c.currentTitle ?? "").toLowerCase(),
+    years: (c) => c.yearsExperience,
+    source: (c) => c.source,
+    applications: (c) => c.applications.length,
+    bestScore: (c) => c.best ?? -Infinity,
+  });
   useEffect(() => setPage(0), [query, sourceFilter]);
-  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
@@ -572,33 +644,29 @@ function Candidates() {
         <Table>
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Name</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Title</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Years</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Source</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Applications</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Best score</TableHead>
+              <SortableHead label="Name" sortKey="name" sort={sort} setSort={setSort} />
+              <SortableHead label="Title" sortKey="title" sort={sort} setSort={setSort} />
+              <SortableHead label="Years" sortKey="years" sort={sort} setSort={setSort} />
+              <SortableHead label="Source" sortKey="source" sort={sort} setSort={setSort} />
+              <SortableHead label="Applications" sortKey="applications" sort={sort} setSort={setSort} />
+              <SortableHead label="Best score" sortKey="bestScore" sort={sort} setSort={setSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pageItems.map((c) => {
-              const scores = c.applications.map((a: any) => a.interview?.feedback?.overallScore).filter((s: unknown) => typeof s === "number");
-              const best = scores.length ? Math.max(...scores) : null;
-              return (
-                <TableRow key={c.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-bg)]/40">
-                  <TableCell>
-                    <Link to="/candidates/$candidateId" params={{ candidateId: c.id }} className="warm-heading text-lg hover:underline">
-                      {c.firstName} {c.lastName}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="opacity-70">{c.currentTitle}</TableCell>
-                  <TableCell className="opacity-70">{c.yearsExperience}</TableCell>
-                  <TableCell><WarmSourceBadge source={c.source} /></TableCell>
-                  <TableCell className="opacity-70">{c.applications.length}</TableCell>
-                  <TableCell className="warm-heading">{best ?? "—"}</TableCell>
-                </TableRow>
-              );
-            })}
+            {pageItems.map((c) => (
+              <TableRow key={c.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-bg)]/40">
+                <TableCell>
+                  <Link to="/candidates/$candidateId" params={{ candidateId: c.id }} className="warm-heading text-lg hover:underline">
+                    {c.firstName} {c.lastName}
+                  </Link>
+                </TableCell>
+                <TableCell className="opacity-70">{c.currentTitle}</TableCell>
+                <TableCell className="opacity-70">{c.yearsExperience}</TableCell>
+                <TableCell><WarmSourceBadge source={c.source} /></TableCell>
+                <TableCell className="opacity-70">{c.applications.length}</TableCell>
+                <TableCell className="warm-heading">{c.best ?? "—"}</TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </div>
@@ -614,22 +682,39 @@ function CandidateDetail() {
   return (
     <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="space-y-1">
-        <h1 className="warm-heading text-4xl sm:text-5xl">{c.firstName} {c.lastName}</h1>
+        <h1 className="warm-heading flex flex-wrap items-center gap-2 text-4xl sm:text-5xl">
+          {c.firstName} {c.lastName} <WarmBadge status={c.status} />
+        </h1>
         <p className="text-sm opacity-70">
-          {c.currentTitle} at {c.currentCompany} · {c.yearsExperience}y · {c.location} · {c.source.replace(/_/g, " ")}
+          {c.currentTitle} at {c.currentCompany} · {c.yearsExperience}y ({c.seniority}) · {c.location} · {c.source.replace(/_/g, " ")}
+          {c.sourceDetail ? ` (${c.sourceDetail})` : ""}
           {c.requiresSponsorship ? " · needs sponsorship" : ""}
         </p>
       </div>
+
+      <section>
+        <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Details</h2>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
+          <div><div className="opacity-60">Email</div><a href={`mailto:${c.email}`} className="hover:underline">{c.email}</a></div>
+          <div><div className="opacity-60">Phone</div><div>{c.phone ?? "—"}</div></div>
+          <div>
+            <div className="opacity-60">LinkedIn</div>
+            {c.linkedinUrl
+              ? <a href={c.linkedinUrl} target="_blank" rel="noreferrer" className="hover:underline">{c.linkedinUrl.replace(/^https?:\/\//, "")}</a>
+              : <div>—</div>}
+          </div>
+          <div><div className="opacity-60">Available in</div><div>{c.availableInDays != null ? `${c.availableInDays}d` : "now"}</div></div>
+          <div><div className="opacity-60">Desired salary</div><div>{money(c.desiredSalaryCents)}</div></div>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-8">
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Skills</h2>
-            <div className="flex flex-wrap gap-1.5">
-              {c.skills.map((s: any) => (
-                <span key={s.skillId} className="rounded-full bg-[var(--warm-tan)] px-3 py-1 text-xs">
-                  {s.skill.name}{s.years ? ` · ${s.years}y` : ""}
-                </span>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[...c.skills].sort((a: any, b: any) => (b.years ?? 0) - (a.years ?? 0)).map((s: any) => (
+                <SkillBar key={s.skillId} name={s.skill.name} years={s.years} />
               ))}
             </div>
           </section>
@@ -702,6 +787,7 @@ function Interviews() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<(typeof INTERVIEW_STATUSES)[number]>("all");
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState<SortState<"candidate" | "company" | "job" | "round" | "interviewer" | "when" | "status" | "score">>({ key: null, dir: "asc" });
 
   const completed = data.filter((i) => i.status === "completed");
   const scores = completed.map((i) => i.feedback?.overallScore).filter((s) => typeof s === "number");
@@ -714,8 +800,18 @@ function Interviews() {
       || `${i.application.candidate.firstName} ${i.application.candidate.lastName}`.toLowerCase().includes(q)
       || i.application.job.title.toLowerCase().includes(q)
       || i.application.job.company.name.toLowerCase().includes(q)));
+  const sorted = sortRows(filtered, sort, {
+    candidate: (i) => `${i.application.candidate.firstName} ${i.application.candidate.lastName}`.toLowerCase(),
+    company: (i) => i.application.job.company.name.toLowerCase(),
+    job: (i) => i.application.job.title.toLowerCase(),
+    round: (i) => i.round,
+    interviewer: (i) => i.interviewer.name.toLowerCase(),
+    when: (i) => new Date(i.completedAt ?? i.scheduledAt).getTime(),
+    status: (i) => i.status,
+    score: (i) => i.feedback?.overallScore ?? -Infinity,
+  });
   useEffect(() => setPage(0), [query, statusFilter]);
-  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
@@ -753,14 +849,14 @@ function Interviews() {
         <Table>
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Candidate</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Company</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Job</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Interviewer</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">When</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Status</TableHead>
-              <TableHead className="text-[var(--warm-ink)] opacity-60">Score</TableHead>
+              <SortableHead label="Candidate" sortKey="candidate" sort={sort} setSort={setSort} />
+              <SortableHead label="Company" sortKey="company" sort={sort} setSort={setSort} />
+              <SortableHead label="Job" sortKey="job" sort={sort} setSort={setSort} />
+              <SortableHead label="Round" sortKey="round" sort={sort} setSort={setSort} />
+              <SortableHead label="Interviewer" sortKey="interviewer" sort={sort} setSort={setSort} />
+              <SortableHead label="When" sortKey="when" sort={sort} setSort={setSort} />
+              <SortableHead label="Status" sortKey="status" sort={sort} setSort={setSort} />
+              <SortableHead label="Score" sortKey="score" sort={sort} setSort={setSort} />
             </TableRow>
           </TableHeader>
           <TableBody>
