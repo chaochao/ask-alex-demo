@@ -3,6 +3,57 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-18 — two more query_entities correctness bugs, plus a job_fit sourcing sort
+
+**"Who are the rejected candidates for this job" returned zero rows despite the job page showing
+7.** Root cause: `runEntityQuery` unconditionally appended `a.status = 'active' OR a.status =
+'hired'` regardless of any explicit `stage` filter — every rejected application has
+`status='rejected'`, which that clause can never match, so `filters.stage: 'rejected'` was
+structurally unsatisfiable no matter the limit or date range. Fixed: only apply that default when
+the caller hasn't already asked for a specific stage (`queries.ts:112`).
+
+**Fixing that surfaced a second, more general bug**: of the 7 rejected candidates, only 2 came
+back — the other 5 had never had a completed interview (rejected at applied/screening). The
+default sort (`strength`) built its join as `needsScore ? INNER JOIN Interview...Feedback :
+LEFT JOIN`, so any application without a completed, *scored* interview was dropped from the
+result entirely, not just ranked lower — for `strength`/`score`/`most_recent_interview`, the three
+most commonly used sorts. This contradicts an invariant already stated elsewhere in this same file
+(`pipelineBuckets`'s own comment: "so nobody silently disappears from an answer") — the inner join
+was quietly violating it for every default "top candidates" query, not just this one case. Fixed
+by always using `LEFT JOIN`: SQLite sorts `NULL` last under `DESC`, so `f.scoreRaw DESC` still
+ranks scored applications first with no inner join doing the exclusion instead.
+
+**Added a `job_fit` sort key to `query_entities`** — deliberately *not* a new tool. The design
+question that led here: "how do we answer 'who's a good fit for job A' without adding a new tool
+every time a new question shape comes up." Looked at what's already in the codebase:
+`query_metrics` is one tool dispatching through a `METRICS` registry (`candidates_count` earlier
+this session was a new registry entry, not a new tool); `query_entities` is the same shape,
+dispatching through `sort.by`. So `job_fit` is just another `sort.by` value, computed via a
+separate code path (`rankCandidatesByFit`, parallel to `countCandidates`) because — like
+`candidates_count` — ranking "the whole candidate pool by fit," not just applicants, has to query
+`Candidate` directly, never through `Application`, or every candidate who hasn't applied yet
+(the entire point of a sourcing query) would be invisible. Scoring rule, chosen for "help a
+recruiter source candidates" specifically: required skills weighted 3x (full credit if years meet
+the job's minimum, partial if under), nice-to-have skills weighted 1x, normalized to 0-100.
+Verified live and against raw SQL before wiring into the tool schema.
+
+**One more fix needed after wiring it up**: `query_entities`'s execute function unconditionally
+attached applicant-pipeline `buckets` whenever `filters.jobId` was present. For `job_fit` those
+numbers are meaningless (they describe applicants; job_fit ranks the whole pool) — the agent
+instructions said not to report them, but the model dutifully reported them anyway because the
+tool was still handing them over. Fixed by suppressing `buckets` at the tool level when
+`sort.by === "job_fit"`, not just telling the model to ignore a field it shouldn't have gotten.
+
+**Chat links now open in a new tab.** URLs embedded in tool output were already being turned into
+clickable `<a>` tags (see the "linkify" entry above), but without `target="_blank"` clicking one
+navigated the current tab away from the chat entirely — a real regression risk every time,
+discarding the whole conversation to view one candidate. One attribute: `target="_blank" rel=
+"noopener noreferrer"`.
+
+Added 5 eval cases: `rejected-stage-not-dropped` (catches regression of both bugs above in one
+question — a scored and an unscored rejected candidate both have to appear), `candidates-count-
+by-title`, `search-full-name`, `search-fuzzy-typo`, and `job-fit-sourcing`. Suite is 15 cases now.
+
 ## 2026-09-18 — eval harness was grading the wrong thing on generate-questions
 
 `generate-questions`'s `countEquals` check counted numbered/bulleted lines in the agent's own

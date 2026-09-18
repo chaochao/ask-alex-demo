@@ -17,7 +17,7 @@ const IS_APP_LINK = /^\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+$/;
 function linkify(text: string) {
   return text.split(APP_LINK_RE).map((part, i) =>
     IS_APP_LINK.test(part)
-      ? <a key={i} href={part} className="underline underline-offset-2 hover:opacity-80">{part}</a>
+      ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:opacity-80">{part}</a>
       : <span key={i}>{part}</span>
   );
 }

@@ -5,3 +5,4 @@ dist
 *.db-journal
 *.tsbuildinfo
 .DS_Store
+ask-chao-internals.html
