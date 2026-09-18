@@ -187,7 +187,7 @@ function Shell() {
         <div className="flex-1" />
         <Button size="sm" variant={open ? "secondary" : "outline"} onClick={() => setOpen((o) => !o)}>
           <Sparkles data-icon="inline-start" />
-          Ask Chao
+          Ask me
           <kbd className="ml-1 hidden rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">⌘K</kbd>
         </Button>
       </nav>
@@ -561,7 +561,7 @@ function JobDetail() {
             <Sparkles className="size-3.5" /> Generated questions
           </h2>
           {j.questions.length === 0 ? (
-            <p className="text-sm opacity-70">None yet — ask Ask Chao to generate some.</p>
+            <p className="text-sm opacity-70">None yet — ask me to generate some.</p>
           ) : (
             <div className="space-y-3">
               {j.questions.map((q: any) => (

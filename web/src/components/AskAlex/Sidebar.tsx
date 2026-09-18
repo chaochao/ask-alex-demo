@@ -197,7 +197,7 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
       )}
     >
       <div className="flex items-center gap-2 border-b px-4 py-3">
-        <strong className="text-sm font-semibold">Ask Chao</strong>
+        <strong className="text-sm font-semibold">Ask me</strong>
         <div className="flex-1" />
         <Button
           size="icon-sm" variant="ghost"
