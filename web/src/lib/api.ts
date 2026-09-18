@@ -5,8 +5,8 @@ export const api = async <T,>(path: string): Promise<T> => {
 };
 
 export type Frame =
-  | { event: "tool-call"; data: { tool: string; args: unknown } }
-  | { event: "tool-result"; data: { tool: string; rows?: number } }
+  | { event: "tool-call"; data: { id: string; tool: string; args: unknown } }
+  | { event: "tool-result"; data: { id: string; tool: string; rows?: number; questions?: { text: string; category: string; rationale: string }[] } }
   | { event: "token"; data: { t: string } }
   | { event: "error"; data: { message: string } }
   | { event: "done"; data: { threadId: string } };

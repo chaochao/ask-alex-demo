@@ -430,9 +430,18 @@ function JobDetail() {
         </p>
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
-        {stageCards.map(({ stage, value }) => <StageStatCard key={stage} stage={stage} value={value} />)}
-        <StageStatCard stage="not_yet_interviewed" value={j.buckets.notYetInterviewed} />
+      <div className="space-y-2">
+        <p className="text-xs font-medium tracking-wide opacity-60">CURRENT STAGE · every application to this job, including rejected</p>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
+          {stageCards.map(({ stage, value }) => <StageStatCard key={stage} stage={stage} value={value} />)}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-medium tracking-wide opacity-60">ACTIVE PIPELINE ONLY · has an interview happened yet?</p>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
+          <StageStatCard stage="not_yet_interviewed" value={j.buckets.notYetInterviewed} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_22rem]">
@@ -711,7 +720,8 @@ function Interviews() {
     (statusFilter === "all" || i.status === statusFilter) &&
     (!q
       || `${i.application.candidate.firstName} ${i.application.candidate.lastName}`.toLowerCase().includes(q)
-      || i.application.job.title.toLowerCase().includes(q)));
+      || i.application.job.title.toLowerCase().includes(q)
+      || i.application.job.company.name.toLowerCase().includes(q)));
   useEffect(() => setPage(0), [query, statusFilter]);
   const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -752,6 +762,7 @@ function Interviews() {
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
               <TableHead className="text-[var(--warm-ink)] opacity-60">Candidate</TableHead>
+              <TableHead className="text-[var(--warm-ink)] opacity-60">Company</TableHead>
               <TableHead className="text-[var(--warm-ink)] opacity-60">Job</TableHead>
               <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
               <TableHead className="text-[var(--warm-ink)] opacity-60">Interviewer</TableHead>
@@ -768,6 +779,7 @@ function Interviews() {
                     {i.application.candidate.firstName} {i.application.candidate.lastName}
                   </Link>
                 </TableCell>
+                <TableCell className="opacity-70">{i.application.job.company.name}</TableCell>
                 <TableCell className="opacity-70">{i.application.job.title}</TableCell>
                 <TableCell className="opacity-70 capitalize">{i.round.replace(/_/g, " ")}</TableCell>
                 <TableCell className="opacity-70">{i.interviewer.name}</TableCell>
@@ -795,7 +807,7 @@ function InterviewDetail() {
           {i.application.candidate.firstName} {i.application.candidate.lastName} — {i.round.replace(/_/g, " ")}
         </h1>
         <p className="flex flex-wrap items-center gap-2 text-sm opacity-70">
-          {i.application.job.title} · {i.interviewer.name} · {date(i.completedAt ?? i.scheduledAt)} <WarmBadge status={i.status} />
+          {i.application.job.company.name} · {i.application.job.title} · {i.interviewer.name} · {date(i.completedAt ?? i.scheduledAt)} <WarmBadge status={i.status} />
         </p>
       </div>
 
