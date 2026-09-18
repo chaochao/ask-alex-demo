@@ -52,11 +52,13 @@ async function main() {
     const messages: { role: "user" | "assistant"; content: string }[] = [];
     let answer = "";
     const used: string[] = [];
+    const toolResults: { toolName: string; result: any }[] = [];
     for (let i = 0; i < turns.length; i++) {
       messages.push({ role: "user", content: i === 0 ? prefix + turns[i] : turns[i] });
       const res: any = await generateWithRetry(agent, messages);
       answer = res.text ?? "";
       used.push(...(res.steps ?? []).flatMap((s: any) => (s.toolCalls ?? []).map((t: any) => t.toolName)));
+      toolResults.push(...(res.steps ?? []).flatMap((s: any) => s.toolResults ?? []));
       messages.push({ role: "assistant", content: answer });
     }
     const latencyMs = Date.now() - started;
@@ -76,8 +78,14 @@ async function main() {
       if (!hit) failures.push(`answer has no number within ${c.expect.tolerance ?? 0.05} of ${truth} (got ${nums.join(", ")})`);
     }
     if (c.expect.countEquals) {
-      const n = (answer.match(/^\s*(\d+[.)]|[-*])\s+/gm) ?? []).length;
-      if (n !== c.expect.countEquals) failures.push(`expected ${c.expect.countEquals} questions, counted ${n}`);
+      // Count the generate_interview_questions tool's actual result, not the prose reply —
+      // the agent is instructed to summarize in one line, not enumerate each question, so a
+      // regex over `answer` counts bullet-shaped lines that aren't there anymore (confirmed via
+      // a captured failing run: 6 real questions, reply said "- Count: 6 questions", 1 bullet).
+      const genResult = toolResults.find((r) => r.toolName === "generate_interview_questions");
+      const n = genResult?.result?.questions?.length ?? 0;
+      if (!genResult) failures.push(`expected ${c.expect.countEquals} questions, generate_interview_questions was not called`);
+      else if (n !== c.expect.countEquals) failures.push(`expected ${c.expect.countEquals} questions, tool returned ${n}`);
     }
 
     const ok = failures.length === 0;

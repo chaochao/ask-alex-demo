@@ -3,6 +3,26 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-18 — eval harness was grading the wrong thing on generate-questions
+
+`generate-questions`'s `countEquals` check counted numbered/bulleted lines in the agent's own
+prose reply (`answer.match(/^\s*(\d+[.)]|[-*])\s+/gm)`). That assumption went stale earlier this
+session: the agent was deliberately changed to stop enumerating each question in text (the sidebar
+renders the tool's structured question list itself now) — but the eval was never updated to match,
+so it kept "failing" on a reply shape that no longer exists. Captured proof from one failing run:
+tool genuinely returned 6 questions, reply said "...- Count: 6 questions (as of Sep 18, 2026)." —
+one bullet-shaped line, so the regex counted 1 and the eval reported "expected 6, counted 1". A
+real generation bug and a stale-eval false positive look identical in the FAIL output; only reading
+the captured `answer` text (not just the failure count) told them apart.
+
+Fixed by reading `res.steps[].toolResults[]` and counting the actual
+`generate_interview_questions` result's `questions.length`, instead of parsing prose
+(`evals/run.ts`). Confirmed the fix works: reran and `generate-questions` passed. Reran the full
+suite again right after — a *different* case (`top-candidates-job`) failed instead. Not a
+regression: these are live LLM calls, non-deterministic by nature; which 3 of 10 fail varies run to
+run (already noted in the 2026-09-17 entry). The eval fix is real and durable; the specific fail set
+on any one run is not a stable signal on its own.
+
 ## 2026-09-18 — search_entities never matched a two-word candidate name, added fuzzy fallback
 
 **Reproduced via a live conversation**: `query_entities` correctly returned a candidate named
