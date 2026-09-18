@@ -3,6 +3,57 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-17 — warm-theme UI redesign, all pages + pagination + rebrand
+
+Redesigned the whole web UI (`web/src/main.tsx`, `web/src/styles.css`, `web/index.html`) to match
+a reference mockup the user supplied (`Hiring Platform.html`, now committed at repo root — a
+bundled/exported single-page artifact, colors and fonts extracted via `getComputedStyle` in a
+live browser, not eyeballed).
+
+**Design system** (`.warm-theme` class in `styles.css`, scoped — doesn't touch the shared shadcn
+theme tokens): Newsreader (headings) / Figtree (body) / Caprasimo (buttons, loaded but barely
+used yet) fonts; cream/tan/mint/rust palette (`--warm-bg`, `--warm-tan`, `--warm-mint`,
+`--warm-rust`, `--warm-rust-dark`, plus `--warm-good` for competency-bar coloring, not from the
+reference — it only showed one page).
+
+**Every page redesigned**, in this order: Job detail → Candidate detail → Interview detail (donut
+`ScoreRing` via CSS `conic-gradient`, `RecommendationScale` using the schema's real 4 values, not
+the reference's 5 — no "mixed" recommendation exists — `CompetencyBar`s colored by a 50-point
+threshold, not a real "passing bar" from the data) → Jobs/Candidates/Interviews list pages (real
+computed header stats, functional client-side search + status/source filter pills, no fake
+"New job"/"Add candidate"/"My roles" controls since there's no backend or auth to support them —
+same reasoning applied consistently each time this came up).
+
+**Badge tone corrections**, both found by comparing against the user's reference screenshots after
+the fact, not designed correctly the first time: `job.status = "open"` and `interview.status =
+"completed"` both moved from bold rust to mint — rust is reserved for an earned outcome
+(hired/offer), not a routine lifecycle state.
+
+**Pagination**: added after the user reported slowness. `Pagination` component, 20/page,
+client-side (search/filter already worked over the full fetched list; this just caps what mounts
+in the DOM, which was the actual render cost). Diagnosed rather than guessed — curl'd all three
+list endpoints (2-20ms) and instrumented `fetch` timing in a live browser session (17-77ms) before
+finding pagination was still worth doing regardless. A *separate*, still-open, real inefficiency
+found during that diagnosis and not yet fixed: `/api/candidates` and `/api/interviews` return full
+nested `job`/`candidate`/`feedback` objects per row (359KB / 167KB payloads) when the list views
+only need a handful of fields each — `/api/jobs` already does this right with
+`_count.applications`; the other two don't. Not done — user said it wasn't causing a real problem
+right now.
+
+**Rebrand**: nav gets a "Trellis" logo mark (reused the reference's brand name, didn't invent one).
+Assistant renamed "Ask Alex" → "Ask Chao" — **frontend UI text only** (nav button, sidebar header,
+tab title, empty-state copy). The backend Mastra agent (`server/src/mastra/agents/ask-alex.ts`,
+the `askAlex` variable/id, its instructions, the eval suite) was deliberately left alone — flagged
+to the user as a scope decision, not fixed silently either way.
+
+**Cleanup**: once every page had migrated to the warm-theme badges, `StatusBadge`, `SourceBadge`,
+`TONE_CLASSES`, `STATUS_TONE`, `SOURCE_TONE_CLASSES`, and the now-unused `Badge` import were all
+removed — dead code created by these exact changes, not pre-existing.
+
+Typecheck stayed at the same 12 pre-existing router-typing errors (confirmed via `git stash`
+early in the redesign work) through every change in this entry. All UI work is committed and
+pushed (`4174653..6cd8923`).
+
 ## 2026-09-17 — root cause of the empty-answer bug, actually fixed this time
 
 Added debug logging (`ASK_ALEX_DEBUG=0` to silence): `routes/ask.ts` now `console.log`s the
