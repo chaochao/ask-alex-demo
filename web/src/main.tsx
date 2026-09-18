@@ -5,7 +5,7 @@ import {
   createRootRoute, createRoute, createRouter, Link, Outlet, RouterProvider, useParams, useRouterState,
 } from "@tanstack/react-router";
 import {
-  Briefcase, CalendarCheck2, ChevronLeft, ChevronRight, Clock, Handshake, Inbox, ListChecks, MessagesSquare,
+  Briefcase, CalendarCheck2, ChevronLeft, ChevronRight, Handshake, Inbox, ListChecks, MessagesSquare,
   Settings as SettingsIcon, Sparkles, UserCheck, Users, XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -36,7 +36,6 @@ const STAGE_CARD_THEME: Record<string, WarmCardTone> = {
   offer: { icon: Handshake, bg: "bg-[var(--warm-rust)]/15", ink: "text-[var(--warm-rust-dark)]", iconBg: "bg-[var(--warm-rust-dark)]/15", iconInk: "text-[var(--warm-rust-dark)]" },
   hired: { icon: UserCheck, bg: "bg-[var(--warm-rust)]", ink: "text-[var(--warm-bg)]", iconBg: "bg-[var(--warm-bg)]", iconInk: "text-[var(--warm-rust-dark)]" },
   rejected: { icon: XCircle, bg: "bg-transparent", ink: "text-[var(--warm-ink)]", iconBg: "bg-[var(--warm-ink)]/10", iconInk: "text-[var(--warm-ink)]", border: true },
-  not_yet_interviewed: { icon: Clock, bg: "bg-transparent", ink: "text-[var(--warm-ink)]", iconBg: "bg-[var(--warm-ink)]/10", iconInk: "text-[var(--warm-ink)]", border: true },
 };
 
 // application.stage / job.status badge tones, warm-theme version — scoped to the job detail
@@ -434,13 +433,6 @@ function JobDetail() {
         <p className="text-xs font-medium tracking-wide opacity-60">CURRENT STAGE · every application to this job, including rejected</p>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
           {stageCards.map(({ stage, value }) => <StageStatCard key={stage} stage={stage} value={value} />)}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium tracking-wide opacity-60">ACTIVE PIPELINE ONLY · has an interview happened yet?</p>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
-          <StageStatCard stage="not_yet_interviewed" value={j.buckets.notYetInterviewed} />
         </div>
       </div>
 
