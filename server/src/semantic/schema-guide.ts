@@ -12,7 +12,9 @@ export const SCHEMA_GUIDE = `Data model:
 - Company / Job: a Job belongs to one Company, has a roleFamily (software_engineer,
   data_engineer, product_manager, designer), seniority, and status (open, on_hold, closed).
 - Candidate: one record per person. location is free text (e.g. "San Francisco, CA") —
-  matched only against the fixed location filter list, not geocoded.
+  matched only against the fixed location filter list, not geocoded. currentTitle is the
+  candidate's current job title at their current employer — distinct from a Job's title
+  (the role they applied to). Filter on it with filters.currentTitle, never filters.jobTitle.
 - Application: links a Candidate to a Job. stage moves forward through
   applied → screening → interviewing → offer → hired, or rejected at any point.
   One Application per (candidate, job) pair.

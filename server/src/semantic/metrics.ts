@@ -18,6 +18,8 @@ export const METRICS = {
     definition: "active applications grouped by current stage" },
   competency_avg:      { label: "Average competency score", unit: "score_0_100",
     definition: "mean competency score across scored interviews" },
+  candidates_count:    { label: "Candidates",               unit: "count",
+    definition: "distinct candidates matching filters, counted from the Candidate table directly (includes candidates with no application)" },
 } as const;
 
 export type MetricName = keyof typeof METRICS;

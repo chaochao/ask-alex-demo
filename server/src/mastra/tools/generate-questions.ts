@@ -19,7 +19,9 @@ export const questionSchema = z.object({
 
 export const generateInterviewQuestions = createTool({
   id: "generate_interview_questions",
-  description: "Generate interview questions grounded in a job's requirements. Use when asked for questions for a role or a candidate.",
+  description: "Generate interview questions grounded in a job's requirements. Use when asked for " +
+    "questions for a role or a candidate. Returned for display only — set persist:true only if the " +
+    "user explicitly asks to save/add them to the job.",
   inputSchema: z.object({
     jobId: z.string(),
     count: z.number().int().min(3).max(10).default(8),
@@ -27,7 +29,7 @@ export const generateInterviewQuestions = createTool({
                     system_design: z.number().int().optional(), role_specific: z.number().int().optional() }).optional(),
     difficulty: z.enum(["easy","medium","hard","mixed"]).default("mixed"),
     candidateId: z.string().optional(),
-    persist: z.boolean().default(true),
+    persist: z.boolean().default(false),
   }),
   outputSchema: z.object({
     jobId: z.string(), generationId: z.string(),

@@ -10,6 +10,7 @@ const filters = z.object({
   roleFamily: z.enum(["software_engineer","data_engineer","product_manager","designer"]).optional(),
   jobId: z.string().optional(),
   jobTitle: z.string().optional(),
+  currentTitle: z.string().optional(),
   stage: z.enum(["applied","screening","interviewing","offer","hired","rejected"]).optional(),
   round: z.enum(["screen","technical","hiring_manager","onsite"]).optional(),
   source: z.string().optional(),
@@ -103,10 +104,16 @@ export const queryEntities = createTool({
   inputSchema: z.object({
     entity: z.enum(["candidate","job","interview","application"]).default("candidate"),
     filters, window: windowSchema,
+    // .default({}) on the object itself, not just its fields — a field-level .default() only
+    // fires once the key is present. The model reasonably omits `sort` entirely when every field
+    // inside it has a default, and without this the whole call fails schema validation with
+    // "sort: Required", silently: AI_InvalidToolArgumentsError never reaches onStepFinish, so the
+    // step ends with finishReason "tool-calls" but empty toolCalls/text — looks identical to a
+    // model that gave up, not a rejected call.
     sort: z.object({
       by: z.enum(["strength","score","most_recent_interview","years_experience","applied_at","stage_age","name"]).default("strength"),
       dir: z.enum(["asc","desc"]).default("desc"),
-    }),
+    }).default({}),
     limit: z.number().int().min(1).max(25).default(10),
   }),
   outputSchema: z.object({

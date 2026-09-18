@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { METRICS, LOCATION_ALIASES, type Dimension, type LocationKey, type MetricName } from "./metrics.js";
 
 export const db = new PrismaClient();
-export const asOf = () => new Date().toISOString();
+export const asOf = () => new Date().toLocaleDateString("en-US", { dateStyle: "medium", timeZone: "UTC" });
 
 // The model sends a placeholder string for an optional field it means to leave unset (observed:
 // "null", ":null") instead of omitting the key. A truthy-string check treats that as a real value —
@@ -44,6 +44,7 @@ export function resolveWindow(w?: Window) {
 export type Filters = {
   company?: string; roleFamily?: string; jobId?: string; jobTitle?: string; stage?: string; round?: string;
   interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string; location?: LocationKey;
+  currentTitle?: string;
 };
 
 async function companyIdFromName(name: string) {
@@ -189,7 +190,29 @@ const DIM_SQL: Record<Dimension, string> = {
   month: "strftime('%Y-%m', i.completedAt)",
 };
 
+// Candidate is not reached through Application here: joining from Application would silently
+// drop candidates with zero applications, which is exactly the kind of undercount this project's
+// invariants forbid (see pipelineBuckets above).
+async function countCandidates(filters: Filters, dimension?: Dimension) {
+  const currentTitle = clean(filters.currentTitle), source = clean(filters.source);
+  const where: string[] = []; const params: unknown[] = [];
+  if (currentTitle) { where.push("c.currentTitle LIKE ?"); params.push(`%${currentTitle}%`); }
+  if (source)       { where.push("c.source = ?");          params.push(source); }
+  if (filters.location) { where.push("c.location LIKE ?"); params.push(`%${LOCATION_ALIASES[filters.location]}%`); }
+  const dimExpr = dimension === "source" ? "c.source" : null;
+  const sql = `SELECT ${dimExpr ?? "NULL"} AS dimension, COUNT(*) AS value FROM Candidate c
+    ${where.length ? `WHERE ${where.map((w) => `(${w})`).join(" AND ")}` : ""}
+    ${dimExpr ? `GROUP BY ${dimExpr} ORDER BY value DESC` : ""} LIMIT 50`;
+  const rows = await db.$queryRawUnsafe<any[]>(sql, ...params);
+  return {
+    metric: "candidates_count" as MetricName, definition: METRICS.candidates_count.definition, asOf: asOf(),
+    rows: rows.map((r) => ({ dimension: r.dimension === null ? null : String(r.dimension), value: Number(r.value) })),
+    ambiguous: [] as string[],
+  };
+}
+
 export async function runMetric(metric: MetricName, dimensions: Dimension[] = [], filters: Filters = {}, window?: Window) {
+  if (metric === "candidates_count") return countCandidates(filters, dimensions[0]);
   const win = resolveWindow(window);
   const dim = dimensions[0] ? DIM_SQL[dimensions[0]] : "NULL";
   const where: string[] = []; const params: unknown[] = [];
@@ -234,6 +257,7 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
     time_to_first_interview_days: "ROUND(AVG(julianday(i.completedAt) - julianday(a.appliedAt)), 1)",
     funnel_by_stage:      "COUNT(DISTINCT a.id)",
     competency_avg:       "ROUND(AVG(fc.score), 2)",
+    candidates_count:     "COUNT(DISTINCT c.id)", // unreachable: candidates_count returns via countCandidates() above
   };
   if (metric === "funnel_by_stage" && dimensions.length === 0) dimensions = ["stage"];
   if (win) {

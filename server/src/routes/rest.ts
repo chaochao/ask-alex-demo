@@ -39,7 +39,7 @@ rest.get("/api/candidates/:id", async (c) => {
 
 rest.get("/api/interviews", async (c) => {
   const interviews = await db.interview.findMany({
-    include: { interviewer: true, feedback: true, application: { include: { candidate: true, job: true } } },
+    include: { interviewer: true, feedback: true, application: { include: { candidate: true, job: { include: { company: true } } } } },
     orderBy: { scheduledAt: "desc" }, take: 200 });
   return c.json(interviews);
 });

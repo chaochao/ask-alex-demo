@@ -48,12 +48,15 @@ ask.post("/api/ask", (c) =>
           for (const call of step?.toolCalls ?? []) {
             toolCalls.push({ tool: call.toolName, args: call.args });
             log("tool-call", call.toolName, JSON.stringify(call.args));
-            await stream.writeSSE({ event: "tool-call", data: JSON.stringify({ tool: call.toolName, args: call.args }) });
+            await stream.writeSSE({ event: "tool-call", data: JSON.stringify({ id: call.toolCallId, tool: call.toolName, args: call.args }) });
           }
           for (const r of step?.toolResults ?? []) {
             const rows = Array.isArray((r as any).result?.rows) ? (r as any).result.rows.length : undefined;
+            // Forwarded as-is so the sidebar can render the question list itself instead of
+            // relying on the model to reformat it readably in prose.
+            const questions = (r as any).toolName === "generate_interview_questions" ? (r as any).result?.questions : undefined;
             log("tool-result", (r as any).toolName, JSON.stringify((r as any).result).slice(0, 1000));
-            await stream.writeSSE({ event: "tool-result", data: JSON.stringify({ tool: (r as any).toolName, rows }) });
+            await stream.writeSSE({ event: "tool-result", data: JSON.stringify({ id: (r as any).toolCallId, tool: (r as any).toolName, rows, questions }) });
           }
         },
       } as any);
