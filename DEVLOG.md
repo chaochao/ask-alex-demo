@@ -3,6 +3,29 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-18 — search_entities never matched a two-word candidate name, added fuzzy fallback
+
+**Reproduced via a live conversation**: `query_entities` correctly returned a candidate named
+"Hugo Okafor" with a working `/candidates/...` url, but asking "give me details for Hugo Okafor"
+in the same thread got "found no matches." Root cause in `search_entities` (`tools/index.ts`): the
+candidate and interview branches matched the query as one whole string —
+`firstName: { contains: "Hugo Okafor" }` — which can never match, since the name is split across
+two columns. The **job** branch already had a per-significant-word fix for this exact class of bug
+(a comment even documents the reasoning), but it was never applied to candidate/interview search
+when those were written. Confirmed directly against the seeded db before and after: 0 rows via the
+old whole-string query, 1 via a per-word `AND` of per-column `OR`s. Fixed by extracting a shared
+`wordTerms()` helper and applying it to all three branches.
+
+**Added fuzzy name matching** as a fallback for when even the per-word search finds nothing (a
+typo, not just a multi-word name). No new dependency: Levenshtein edit-distance is a ~10-line DP
+algorithm, and the candidate table is small (~120 rows in the seed), so a full-table JS-side scan
+is cheap. Threshold is `max(2, 30% of the longer string's length)` — loose enough to forgive 1-2
+typos ("Hugoo Okafr", "Hugo Okaffor" both still resolve), tight enough that unrelated text returns
+nothing (verified with a nonsense query). **Known ceiling, not fixed**: this is an O(rows × name
+length²) scan and would not hold up at real scale — a table with 100k+ candidates would need a
+real fuzzy-search index (SQLite's `spellfix1`, Postgres `pg_trgm`, or an external search service)
+instead of comparing every row by hand. Fine for this demo's size; flagged, not a silent gap.
+
 ## 2026-09-18 — sort-schema tool-call bug, candidate headcount gap, sidebar crash + redesign
 
 **Real, reproducible bug in `query_entities`'s tool schema**, found live via a user report ("top

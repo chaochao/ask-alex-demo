@@ -24,6 +24,40 @@ const windowSchema = z.object({
   from: z.string().optional(), to: z.string().optional(),
 }).optional();
 
+// Match per significant word, not the whole phrase — a two-word query like "Hugo Okafor" or
+// "Staff Backend Engineer" must not require one column to contain that entire string; each word
+// only needs to land in *some* column (AND of per-word ORs).
+const wordTerms = (query: string, minLen: number) => {
+  const words = query.trim().split(/\s+/).filter((w) => w.length >= minLen);
+  return words.length ? words : [query];
+};
+
+function levenshtein(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+  return dp[a.length][b.length];
+}
+
+// Typo tolerance for candidate names: SQLite here has no fuzzy-match extension loaded, and the
+// table is small (low hundreds of rows), so a full-table edit-distance scan in JS is cheap and
+// needs no new dependency. Only runs as a fallback once the exact word-match search finds nothing.
+async function fuzzyCandidates(query: string, limit: number) {
+  const q = query.trim().toLowerCase();
+  const all = await db.candidate.findMany();
+  return all
+    .map((c) => {
+      const name = `${c.firstName} ${c.lastName}`.toLowerCase();
+      return { c, dist: levenshtein(q, name), maxLen: Math.max(q.length, name.length) };
+    })
+    .filter(({ dist, maxLen }) => dist <= Math.max(2, Math.floor(maxLen * 0.3)))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, limit)
+    .map(({ c }) => c);
+}
+
 export const searchEntities = createTool({
   id: "search_entities",
   description: "Find a job, candidate or interview by name or title. Use when the user names something specific.",
@@ -35,23 +69,30 @@ export const searchEntities = createTool({
   outputSchema: z.object({ rows: z.array(z.object({ id: z.string(), label: z.string(), subtitle: z.string(), url: z.string() })) }),
   execute: async ({ context: { entity, query, limit } }) => {
     if (entity === "job") {
-      // Match per significant word, not the whole phrase — a query like "Staff Backend
-      // Engineer job posting" must not require the title to contain that entire string.
-      const words = query.trim().split(/\s+/).filter((w) => w.length >= 3);
-      const terms = words.length ? words : [query];
+      const terms = wordTerms(query, 3);
       const rows = await db.job.findMany({
         where: { AND: terms.map((t) => ({ OR: [{ title: { contains: t } }, { company: { name: { contains: t } } }] })) },
         include: { company: true }, take: limit });
       return { rows: rows.map((j) => ({ id: j.id, label: j.title, subtitle: `${j.company.name} · ${j.status}`, url: `/jobs/${j.id}` })) };
     }
     if (entity === "candidate") {
-      const rows = await db.candidate.findMany({
-        where: { OR: [{ firstName: { contains: query } }, { lastName: { contains: query } }, { email: { contains: query } }] }, take: limit });
+      const terms = wordTerms(query, 1);
+      let rows = await db.candidate.findMany({
+        where: { AND: terms.map((t) => ({ OR: [{ firstName: { contains: t } }, { lastName: { contains: t } }, { email: { contains: t } }] })) },
+        take: limit });
+      if (rows.length === 0) rows = await fuzzyCandidates(query, limit);
       return { rows: rows.map((c) => ({ id: c.id, label: `${c.firstName} ${c.lastName}`, subtitle: `${c.currentTitle ?? ""} · ${c.yearsExperience}y`, url: `/candidates/${c.id}` })) };
     }
-    const rows = await db.interview.findMany({
-      where: { application: { candidate: { OR: [{ firstName: { contains: query } }, { lastName: { contains: query } }] } } },
+    const terms = wordTerms(query, 1);
+    let rows = await db.interview.findMany({
+      where: { application: { candidate: { AND: terms.map((t) => ({ OR: [{ firstName: { contains: t } }, { lastName: { contains: t } }] })) } } },
       include: { application: { include: { candidate: true, job: true } } }, take: limit });
+    if (rows.length === 0) {
+      const candidateIds = (await fuzzyCandidates(query, limit)).map((c) => c.id);
+      if (candidateIds.length) rows = await db.interview.findMany({
+        where: { application: { candidateId: { in: candidateIds } } },
+        include: { application: { include: { candidate: true, job: true } } }, take: limit });
+    }
     return { rows: rows.map((i) => ({ id: i.id, label: `${i.application.candidate.firstName} ${i.application.candidate.lastName} — ${i.round}`, subtitle: `${i.application.job.title} · ${i.status}`, url: `/interviews/${i.id}` })) };
   },
 });
