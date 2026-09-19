@@ -83,7 +83,7 @@ ask.post("/api/ask", (c) =>
       } else {
         callMs = 0; toolMs = 0; answerMs = turnEnd - turnStart;
       }
-      log(`timing: call ${callMs}ms · tool ${toolMs}ms · answer ${answerMs}ms (total ${turnEnd - turnStart}ms)`);
+      log("timing", JSON.stringify({ callMs, toolMs, answerMs, totalMs: turnEnd - turnStart }));
       // Safety net: a tool-call loop can exhaust its steps without ever emitting text.
       // Never send an empty response — the underlying loop is a separate, open bug (see DEVLOG).
       if (!text.trim()) {

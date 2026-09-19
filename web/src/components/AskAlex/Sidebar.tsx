@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, RotateCcw, SendHorizontal, ChevronRight, ChevronDown } from "lucide-react";
+import { X, RotateCcw, SendHorizontal, ChevronRight, ChevronDown, ThumbsUp, ThumbsDown } from "lucide-react";
 import { askStream } from "../../lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,29 @@ import { Separator } from "@/components/ui/separator";
 
 type Question = { text: string; category: string; rationale: string };
 type Step = { id: string; tool: string; status: "running" | "done"; rows?: number };
-type Msg = { role: "user" | "assistant"; text: string; questions?: Question[]; steps?: Step[] };
+type Msg = { role: "user" | "assistant"; text: string; questions?: Question[]; steps?: Step[]; feedback?: "up" | "down" };
+
+// UI-only for now — clicking just sets local state, nothing is sent anywhere.
+function FeedbackButtons({ value, onChange }: { value?: "up" | "down"; onChange: (v: "up" | "down" | undefined) => void }) {
+  const [popKey, setPopKey] = useState(0);
+  const click = (v: "up" | "down") => { onChange(value === v ? undefined : v); setPopKey((k) => k + 1); };
+  return (
+    <div className="mt-1.5 flex items-center gap-0.5">
+      <button
+        type="button" onClick={() => click("up")} aria-label="Good response" aria-pressed={value === "up"}
+        className={cn("rounded-md p-1 transition-colors hover:bg-muted", value === "up" ? "text-green-600" : "text-muted-foreground")}
+      >
+        <ThumbsUp key={value === "up" ? popKey : "up"} className={cn("size-3.5", value === "up" && "animate-in zoom-in-50 duration-300")} fill={value === "up" ? "currentColor" : "none"} />
+      </button>
+      <button
+        type="button" onClick={() => click("down")} aria-label="Bad response" aria-pressed={value === "down"}
+        className={cn("rounded-md p-1 transition-colors hover:bg-muted", value === "down" ? "text-red-600" : "text-muted-foreground")}
+      >
+        <ThumbsDown key={value === "down" ? popKey : "down"} className={cn("size-3.5", value === "down" && "animate-in zoom-in-50 duration-300")} fill={value === "down" ? "currentColor" : "none"} />
+      </button>
+    </div>
+  );
+}
 
 // Tool results embed app-relative paths as plain text (e.g. "profile: /candidates/abc123") —
 // turn those into clickable links instead of leaving them as inert text the user has to copy.
@@ -255,6 +277,12 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
                 </ol>
               )}
               {m.steps && <ToolSteps steps={m.steps} live={live} />}
+              {m.role === "assistant" && m.text && !live && (
+                <FeedbackButtons
+                  value={m.feedback}
+                  onChange={(v) => setMessages((ms) => { const copy = [...ms]; copy[i] = { ...copy[i], feedback: v }; return copy; })}
+                />
+              )}
             </div>
           );
         })}
