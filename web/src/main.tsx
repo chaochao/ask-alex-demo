@@ -479,8 +479,7 @@ function JobDetail() {
   const { data: j } = useQuery({ queryKey: ["job", jobId], queryFn: () => api<any>(`/api/jobs/${jobId}`) });
   if (!j) return <Loading />;
   const ranked = [...j.applications]
-    .filter((a: any) => a.interview)
-    .sort((a: any, b: any) => (b.interview.feedback?.scoreRaw ?? -Infinity) - (a.interview.feedback?.scoreRaw ?? -Infinity));
+    .sort((a: any, b: any) => (b.interview?.feedback?.scoreRaw ?? -Infinity) - (a.interview?.feedback?.scoreRaw ?? -Infinity));
   const byStage: Record<string, number> = Object.fromEntries(j.byStage.map((s: any) => [s.dimension, s.value]));
   const stageCards = STAGE_ORDER.filter((s) => byStage[s] != null).map((s) => ({ stage: s, value: byStage[s] }));
   return (
@@ -489,7 +488,7 @@ function JobDetail() {
         <h1 className="warm-heading text-4xl sm:text-5xl">{j.title}</h1>
         <p className="warm-heading text-xl opacity-80">{j.company.name}</p>
         <p className="text-sm opacity-70">
-          {j.seniority} · {j.location} · {money(j.salaryMinCents)}–{money(j.salaryMaxCents)} · recruiter {j.recruiter.name}
+          {j.seniority} · {j.location} · {money(j.salaryMinCents)}–{money(j.salaryMaxCents)} · {j.openings} opening{j.openings === 1 ? "" : "s"} · recruiter {j.recruiter.name}
         </p>
       </div>
 
@@ -527,10 +526,10 @@ function JobDetail() {
           </section>
 
           <section>
-            <h2 className="text-xs font-medium tracking-wide uppercase opacity-60">Interview results</h2>
+            <h2 className="text-xs font-medium tracking-wide uppercase opacity-60">Job status</h2>
             <p className="mb-3 text-xs opacity-60">
-              Every application with an interview on record, in any stage — including ones with no
-              score yet because the interview hasn't happened, was cancelled, or was a no-show.
+              Every application to this job, every stage — applied and screening candidates who
+              haven't interviewed yet, alongside ones with an interview on record, scored or not.
             </p>
             <div className="overflow-hidden rounded-[1rem] border border-[var(--warm-border)]">
               <Table>
@@ -553,17 +552,25 @@ function JobDetail() {
                         </Link>
                       </TableCell>
                       <TableCell><WarmBadge status={a.stage} /></TableCell>
-                      <TableCell className="opacity-70 capitalize">{a.interview.round.replace(/_/g, " ")}</TableCell>
-                      <TableCell><WarmBadge status={a.interview.status} /></TableCell>
+                      <TableCell className="opacity-70 capitalize">
+                        {a.interview ? a.interview.round.replace(/_/g, " ") : <span className="opacity-60">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        {a.interview ? <WarmBadge status={a.interview.status} /> : <span className="opacity-60">—</span>}
+                      </TableCell>
                       <TableCell className="tabular-nums">
-                        {a.interview.feedback ? (
+                        {a.interview?.feedback ? (
                           <>
                             <span className="warm-heading">{a.interview.feedback.overallScore}</span>{" "}
-                            <span className="opacity-60">({a.interview.feedback.scoreRaw.toFixed(1)})</span>
+                            <span className="opacity-60">
+                              ({a.interview.feedback.scoreRaw.toFixed(1)} · {a.interview.feedback.recommendation.replace(/_/g, " ")})
+                            </span>
                           </>
                         ) : <span className="opacity-60">—</span>}
                       </TableCell>
-                      <TableCell className="opacity-70">{date(a.interview.completedAt ?? a.interview.scheduledAt)}</TableCell>
+                      <TableCell className="opacity-70">
+                        {a.interview ? date(a.interview.completedAt ?? a.interview.scheduledAt) : date(a.appliedAt)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -761,7 +768,10 @@ function CandidateDetail() {
                         <TableCell><WarmBadge status={a.interview.status} /></TableCell>
                         <TableCell className="tabular-nums">
                           {a.interview.feedback ? (
-                            <span className="warm-heading">{a.interview.feedback.overallScore}</span>
+                            <>
+                              <span className="warm-heading">{a.interview.feedback.overallScore}</span>{" "}
+                              <span className="opacity-60">({a.interview.feedback.recommendation.replace(/_/g, " ")})</span>
+                            </>
                           ) : <span className="opacity-60">—</span>}
                         </TableCell>
                         <TableCell className="opacity-70">{date(a.interview.completedAt ?? a.interview.scheduledAt)}</TableCell>
@@ -785,7 +795,7 @@ function CandidateDetail() {
                   </div>
                   {a.interview ? (
                     <div className="text-sm opacity-80">
-                      <div className="capitalize">
+                      <Link to="/interviews/$interviewId" params={{ interviewId: a.interview.id }} className="capitalize hover:underline">
                         {a.interview.round.replace(/_/g, " ")} with {a.interview.interviewer.name} · {a.interview.status.replace(/_/g, " ")}
                         {a.interview.feedback && (
                           <>
@@ -794,7 +804,7 @@ function CandidateDetail() {
                             <span className="rounded-full bg-[var(--warm-bg)] px-2 py-0.5 text-xs">{a.interview.feedback.source}</span>
                           </>
                         )}
-                      </div>
+                      </Link>
                       {a.interview.feedback && (
                         <ul className="mt-2 space-y-1">
                           {a.interview.feedback.competencies.map((k: any) => (

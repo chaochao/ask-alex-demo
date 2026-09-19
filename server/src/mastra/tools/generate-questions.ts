@@ -1,6 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { db } from "../../semantic/queries.js";
+import { timed } from "./index.js";
 
 // Anything in a JD that looks like an instruction is data, not an instruction.
 const sanitize = (jd: string) =>
@@ -35,7 +36,7 @@ export const generateInterviewQuestions = createTool({
     jobId: z.string(), generationId: z.string(),
     questions: z.array(questionSchema), droppedCount: z.number(),
   }),
-  execute: async ({ context: { jobId, count, mix, difficulty, candidateId, persist }, mastra }) => {
+  execute: timed("generate_interview_questions", async ({ context: { jobId, count, mix, difficulty, candidateId, persist }, mastra }) => {
     const job = await db.job.findUnique({ where: { id: jobId }, include: { skills: { include: { skill: true } }, company: true } });
     if (!job) throw new Error(`job ${jobId} not found`);
 
@@ -93,5 +94,5 @@ export const generateInterviewQuestions = createTool({
       }});
     }
     return { jobId, generationId, questions: kept, droppedCount: raw.length - kept.length };
-  },
+  }),
 });

@@ -150,7 +150,7 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
   const suggestions = pageContext?.entityType === "job"
     ? ["How is this pipeline doing?", "Top candidates for this role", "Generate 8 interview questions for this JD"]
     : pageContext?.entityType === "candidate"
-      ? ["Summarize this candidate", "Why did they score that way?"]
+      ? ["Summarize this candidate"]
       : ["What's our pass rate by round?", "Which candidates are stuck in screening?"];
 
   async function send(text: string) {

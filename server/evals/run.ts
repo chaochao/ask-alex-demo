@@ -1,5 +1,6 @@
 import { mastra } from "../src/mastra/index.js";
 import { db } from "../src/semantic/queries.js";
+import { toolTimings } from "../src/mastra/tools/index.js";
 import cases from "./cases.json" with { type: "json" };
 
 type Case = {
@@ -53,9 +54,26 @@ async function main() {
     let answer = "";
     const used: string[] = [];
     const toolResults: { toolName: string; result: any }[] = [];
+    // call = model thinking time before its first tool call; tool = span from first tool call
+    // start to last tool call end; answer = time after the last tool result to the finished reply.
+    // A turn with no tool call counts entirely as "answer" (nothing to split it from).
+    let callMs = 0, toolMs = 0, answerMs = 0;
     for (let i = 0; i < turns.length; i++) {
       messages.push({ role: "user", content: i === 0 ? prefix + turns[i] : turns[i] });
+      const turnStart = Date.now();
+      const before = toolTimings.length;
       const res: any = await generateWithRetry(agent, messages);
+      const turnEnd = Date.now();
+      const calls = toolTimings.slice(before);
+      if (calls.length) {
+        const firstStart = Math.min(...calls.map((t) => t.start));
+        const lastEnd = Math.max(...calls.map((t) => t.end));
+        callMs += firstStart - turnStart;
+        toolMs += lastEnd - firstStart;
+        answerMs += turnEnd - lastEnd;
+      } else {
+        answerMs += turnEnd - turnStart;
+      }
       answer = res.text ?? "";
       used.push(...(res.steps ?? []).flatMap((s: any) => (s.toolCalls ?? []).map((t: any) => t.toolName)));
       toolResults.push(...(res.steps ?? []).flatMap((s: any) => s.toolResults ?? []));
@@ -92,7 +110,7 @@ async function main() {
     ok ? passed++ : failed++;
     await db.evalResult.create({ data: { runId: run.id, caseId: c.id, passed: ok,
       failures: JSON.stringify(failures), answer, toolsUsed: JSON.stringify(used), latencyMs } });
-    console.log(`${ok ? "PASS" : "FAIL"}  ${c.id.padEnd(24)} ${latencyMs}ms  ${failures.join(" · ")}`);
+    console.log(`${ok ? "PASS" : "FAIL"}  ${c.id.padEnd(24)} ${latencyMs}ms  (call ${callMs}ms · tool ${toolMs}ms · answer ${answerMs}ms)  ${failures.join(" · ")}`);
     if (!ok) console.log(`      answer: ${answer.replace(/\n+/g, " ")}`);
   }
 

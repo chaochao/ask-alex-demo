@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { mastra } from "../mastra/index.js";
 import { db } from "../semantic/queries.js";
+import { toolTimings } from "../mastra/tools/index.js";
 
 export const ask = new Hono();
 
@@ -41,6 +42,13 @@ ask.post("/api/ask", (c) =>
     const toolCalls: unknown[] = [];
     let text = "";
 
+    // Same call/tool/answer split as the eval log: call = model thinking before its first tool
+    // call, tool = span from first tool call start to last tool call end, answer = time after the
+    // last tool result to the finished reply. toolTimings is the shared timing array every tool's
+    // execute() writes to (server/src/mastra/tools/index.ts) — read only, this request's slice.
+    const turnStart = Date.now();
+    const timingsBefore = toolTimings.length;
+
     try {
       const result = await agent.stream(messages, {
         abortSignal: c.req.raw.signal,
@@ -65,6 +73,17 @@ ask.post("/api/ask", (c) =>
         text += chunk;
         await stream.writeSSE({ event: "token", data: JSON.stringify({ t: chunk }) });
       }
+      const turnEnd = Date.now();
+      const calls = toolTimings.slice(timingsBefore);
+      let callMs: number, toolMs: number, answerMs: number;
+      if (calls.length) {
+        const firstStart = Math.min(...calls.map((t) => t.start));
+        const lastEnd = Math.max(...calls.map((t) => t.end));
+        callMs = firstStart - turnStart; toolMs = lastEnd - firstStart; answerMs = turnEnd - lastEnd;
+      } else {
+        callMs = 0; toolMs = 0; answerMs = turnEnd - turnStart;
+      }
+      log(`timing: call ${callMs}ms · tool ${toolMs}ms · answer ${answerMs}ms (total ${turnEnd - turnStart}ms)`);
       // Safety net: a tool-call loop can exhaust its steps without ever emitting text.
       // Never send an empty response — the underlying loop is a separate, open bug (see DEVLOG).
       if (!text.trim()) {

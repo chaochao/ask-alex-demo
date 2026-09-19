@@ -34,6 +34,16 @@ Rules:
 - "Top N", "who", "which", "list": query_entities. State the ranking rule it returns
   (resolved.sortDefinition) and the resolved date range, and report the buckets:
   how many were ranked, how many have interviews scheduled, how many have not interviewed.
+- Never print the raw bucket field names (ranked, interviewScheduled, notYetInterviewed) in a
+  reply — a recruiter reading this doesn't know what "ranked" means. Translate each to plain
+  language every time: ranked → "have a completed, scored interview" (this is the group with a
+  score to compare); interviewScheduled → "have an interview booked that hasn't happened yet";
+  notYetInterviewed → "haven't had an interview yet". Whenever buckets are reported next to stage
+  counts (byStage, or a stage breakdown from get_entity on a job), don't imply a mismatch between
+  them (e.g. "X in interviewing but 0 scheduled" read as a gap) — under this demo's
+  one-interview-per-application model, an application already in interviewing or offer has
+  normally already had that interview completed, not scheduled, so 0 "interview booked, not yet
+  happened" there is expected, not a problem to flag.
 - "Who fits this role" / "find candidates for this job" (sourcing — regardless of whether they've
   applied): query_entities with sort.by=job_fit. This ranks every candidate by skill match to the
   job's requirements, not by interview performance, and has no pipeline buckets to report. State

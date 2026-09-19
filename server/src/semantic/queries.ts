@@ -44,7 +44,7 @@ export function resolveWindow(w?: Window) {
 export type Filters = {
   company?: string; roleFamily?: string; jobId?: string; jobTitle?: string; stage?: string; round?: string;
   interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string; recruiterName?: string;
-  location?: LocationKey; currentTitle?: string; skills?: string[]; skillMatch?: "all" | "any";
+  location?: LocationKey; currentTitle?: string; skills?: string[]; skillMatch?: "all" | "any"; candidateId?: string;
 };
 
 async function companyIdFromName(name: string) {
@@ -76,11 +76,14 @@ async function jobIdFromTitle(title: string, companyId?: string) {
 const STAGE_RANK = `CASE a.stage WHEN 'offer' THEN 4 WHEN 'interviewing' THEN 3 WHEN 'screening' THEN 2 ELSE 1 END`;
 
 // Sourcing, not pipeline ranking: "who in the whole candidate pool fits this job" has nothing to
-// do with whether someone applied, so this queries Candidate directly (like countCandidates
-// above), never through Application — an applicant filter would just drop everyone recruiters
-// haven't found yet, which is the entire point of this sort.
+// do with whether someone applied, so by default this queries Candidate directly (like
+// countCandidates above), never through Application — an applicant filter would just drop everyone
+// recruiters haven't found yet, which is the entire point of this sort. filters.stage is the one
+// opt-in exception: "top fit among who's applied" is asking for the applicant pool specifically, so
+// when stage is given the query joins Application to scope to it.
 async function rankCandidatesByFit(f: Filters, limit: number) {
-  const company = clean(f.company), jobTitle = clean(f.jobTitle), jobId = clean(f.jobId);
+  const company = clean(f.company), jobTitle = clean(f.jobTitle), jobId = clean(f.jobId),
+        candidateId = clean(f.candidateId), stage = clean(f.stage);
   let resolvedCompany: string | null = null, resolvedCompanyId: string | undefined, resolvedJobId = jobId;
 
   if (company) {
@@ -96,12 +99,26 @@ async function rankCandidatesByFit(f: Filters, limit: number) {
   if (!resolvedJobId) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: null, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
 
   const reqs = await db.jobSkill.findMany({ where: { jobId: resolvedJobId }, include: { skill: true } });
-  const sortDefinition = "required skills met (full credit if years meet the job's minimum, "
+  let sortDefinition = "required skills met (full credit if years meet the job's minimum, "
     + "partial credit if under, weighted 3x), plus nice-to-have skills present (weighted 1x), "
     + "as a percent of the maximum possible — independent of whether they've applied";
+  if (stage) sortDefinition += `, restricted to candidates with an application to this job in the '${stage}' stage`;
   if (reqs.length === 0) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: null, sortDefinition, asOf: asOf(), ambiguous: [] as string[] } };
 
   const possible = reqs.reduce((sum, r) => sum + (r.required ? 3 : 1), 0);
+  // candidateId pins the query to one person instead of ranking the pool — needed because the
+  // ranked path caps at 25 rows, which silently drops anyone not in the top 25 by fit. stage scopes
+  // the pool to this job's own applicants at that stage — "top fit among who's applied" needs both
+  // the skill-fit score (only computed here) and the applicant filter (normally only on the
+  // strength/score sort path), so this joins Application in rather than duplicating the query.
+  const params: unknown[] = [resolvedJobId];
+  let joinSql = "";
+  if (stage) { joinSql = "JOIN Application a ON a.candidateId = c.id AND a.jobId = ? AND a.stage = ?"; params.push(resolvedJobId, stage); }
+  let whereSql = "";
+  if (candidateId) { whereSql = "WHERE c.id = ?"; params.push(candidateId); }
+  let limitSql = "";
+  if (!candidateId) { limitSql = "LIMIT ?"; params.push(limit); }
+
   const scored = await db.$queryRawUnsafe<any[]>(`
     SELECT c.id, c.firstName || ' ' || c.lastName AS label,
       SUM(
@@ -116,9 +133,11 @@ async function rankCandidatesByFit(f: Filters, limit: number) {
     FROM Candidate c
     CROSS JOIN JobSkill js ON js.jobId = ?
     LEFT JOIN CandidateSkill cs ON cs.candidateId = c.id AND cs.skillId = js.skillId
+    ${joinSql}
+    ${whereSql}
     GROUP BY c.id
     ORDER BY earned DESC
-    LIMIT ?`, resolvedJobId, limit);
+    ${limitSql}`, ...params);
 
   const theirSkills = await db.candidateSkill.findMany({ where: { candidateId: { in: scored.map((r) => r.id) } } });
   const has = new Map<string, Set<string>>();
@@ -127,7 +146,9 @@ async function rankCandidatesByFit(f: Filters, limit: number) {
     has.get(cs.candidateId)!.add(cs.skillId);
   }
 
-  const total = await db.candidate.count();
+  const total = stage
+    ? await db.application.count({ where: { jobId: resolvedJobId, stage } })
+    : await db.candidate.count();
   return {
     rows: scored.map((r) => {
       const owned = has.get(r.id) ?? new Set<string>();

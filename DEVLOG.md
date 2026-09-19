@@ -3,6 +3,48 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-19 — job_fit gets a single-candidate and applicant-stage mode, call/tool/answer timing, UI cleanup
+
+**`job_fit` had no way to answer "what's X's fit score" or "top fit among who's applied."**
+`sort.by=job_fit` only ever ranked the top 25 of the whole candidate pool — asking for one named
+person's score (`filters.candidateId`) or scoping to a job's own applicants at a stage
+(`filters.stage`) both hit the cap or the pool-wide-only default and came back empty or wrong.
+Fixed both as new filters on the existing `job_fit` path in `rankCandidatesByFit`
+(`queries.ts`), not new tools — `candidateId` bypasses the ranking/limit and scores just that
+person; `stage` joins `Application` to scope the pool to this job's applicants at that stage,
+verified against `@@unique([candidateId, jobId])` to confirm a candidate's stage on a *different*
+job can never leak into the join. Pool-wide mode (no `filters.stage`) is unchanged and still the
+default for sourcing questions. Added two eval cases (`job-fit-applied-only`,
+`job-fit-whole-pool`) asserting candidates that only appear in one mode or the other, not names
+that happen to pass either way — `job-fit-sourcing` (pre-existing) turned out to assert a
+candidate who'd actually applied, so it never really proved pool-wide reach. Suite is 18 cases.
+
+**Added call/tool/answer timing to both the eval log and the live server log.** Wrapped every
+tool's `execute` with a shared timer (`toolTimings` in `tools/index.ts`) recording wall-clock
+start/end; `evals/run.ts` and `routes/ask.ts` both slice that array around their own
+request/turn and split elapsed time into: time before the first tool call, span from first tool
+call to last tool result, and time after that to the finished reply. No schema or DB changes —
+console-log only, per explicit "don't over-engineer this" direction.
+
+**Two rounds of "the answer is confusing, not wrong."** A user question ("how's this pipeline
+doing") produced a reply that read `interviewing: 3` next to `interviewScheduled: 0` as if they
+disagreed — they don't; `stage` is a pipeline position, `Interview.status` is whether the event
+happened, and under this demo's one-interview-per-application model an application already in
+`interviewing` normally already had that interview *completed*, not scheduled. Fixed at two
+layers: `schema-guide.ts` now says so explicitly (stops the model misreading it), and
+`ask-alex.ts` now requires translating every bucket name to plain language in the reply itself
+(`ranked` → "have a completed, scored interview", etc.) instead of printing the raw field name —
+a recruiter has no reason to know what "ranked" means.
+
+**Frontend**: job detail page's application table (renamed "Interview results" → "Job status")
+now lists every application regardless of interview status — applied/screening candidates
+showed `—` and their applied date instead of being dropped entirely — and its Score column now
+shows the recommendation alongside the number (`96 (96.4 · strong yes)`). Candidate detail page:
+the Applications section's interview line now links to the interview detail page (previously
+only the job title linked anywhere); its Interviews table also gained the recommendation next to
+score. Job detail header now shows `openings` (was computed and used in chat answers but never
+rendered anywhere in the UI).
+
 ## 2026-09-18/19 — dead recruiter filter, pass-rate null-vs-zero bug, whole-pool skills filter
 
 **`filters.recruiterId` was dead code.** Fully wired into `queries.ts` SQL (`a.ownerId = ?`) but

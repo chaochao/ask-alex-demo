@@ -21,6 +21,16 @@ export const SCHEMA_GUIDE = `Data model:
   application — filter on it with filters.recruiterId if you already have their id, or
   filters.recruiterName ("Marc") to have it resolved server-side. This is the recruiter
   owning the application, not necessarily the same person as the Job's own recruiter.
+  stage is independent of the Interview's own status — "interviewing" is a pipeline
+  position (past screening, no decision made yet), not a claim that an interview is
+  upcoming. Under this demo's one-interview-per-application model, an application in the
+  interviewing stage has usually already had that interview completed and is waiting on
+  a decision to move to offer or rejected. Do not read pipelineBuckets.interviewScheduled
+  (Interview.status = 'scheduled', an unstarted event) against a stage count of
+  "interviewing" as if they should agree or as a gap to flag — they answer different
+  questions ("is an interview event upcoming" vs "where is this application in the
+  funnel") and a job can correctly show interviewScheduled: 0 with several applications
+  in the interviewing stage.
 - Interview: at most one per Application (one interview round in this demo). Has a
   round (screen, technical, hiring_manager, onsite) and status (scheduled, completed,
   no_show, cancelled).

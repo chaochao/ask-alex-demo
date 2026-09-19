@@ -20,6 +20,7 @@ const filters = z.object({
   recruiterName: z.string().optional(),
   skills: z.array(z.string()).optional(),
   skillMatch: z.enum(["all","any"]).optional(),
+  candidateId: z.string().optional(),
 }).optional();
 
 const windowSchema = z.object({
@@ -62,6 +63,17 @@ async function fuzzyCandidates(query: string, limit: number) {
     .map(({ c }) => c);
 }
 
+// Per-call tool timings, for the eval log's call/tool/answer breakdown (evals/run.ts reads this).
+export const toolTimings: { tool: string; start: number; end: number }[] = [];
+export function timed<F extends (...a: any[]) => Promise<any>>(id: string, fn: F): F {
+  return (async (...a: Parameters<F>) => {
+    const start = Date.now();
+    const result = await fn(...a);
+    toolTimings.push({ tool: id, start, end: Date.now() });
+    return result;
+  }) as F;
+}
+
 export const searchEntities = createTool({
   id: "search_entities",
   description: "Find a job, candidate or interview by name or title. Use when the user names something specific.",
@@ -71,7 +83,7 @@ export const searchEntities = createTool({
     limit: z.number().int().min(1).max(20).default(5),
   }),
   outputSchema: z.object({ rows: z.array(z.object({ id: z.string(), label: z.string(), subtitle: z.string(), url: z.string() })) }),
-  execute: async ({ context: { entity, query, limit } }) => {
+  execute: timed("search_entities", async ({ context: { entity, query, limit } }) => {
     if (entity === "job") {
       const terms = wordTerms(query, 3);
       const rows = await db.job.findMany({
@@ -98,7 +110,7 @@ export const searchEntities = createTool({
         include: { application: { include: { candidate: true, job: true } } }, take: limit });
     }
     return { rows: rows.map((i) => ({ id: i.id, label: `${i.application.candidate.firstName} ${i.application.candidate.lastName} — ${i.round}`, subtitle: `${i.application.job.title} · ${i.status}`, url: `/interviews/${i.id}` })) };
-  },
+  }),
 });
 
 export const getEntity = createTool({
@@ -106,7 +118,7 @@ export const getEntity = createTool({
   description: "Load one record in detail: a candidate with their application and interview, a job with its pipeline, or an interview with its feedback.",
   inputSchema: z.object({ entity: z.enum(["candidate","job","interview"]), id: z.string() }),
   outputSchema: z.object({ entity: z.string(), url: z.string(), asOf: z.string(), data: z.any() }),
-  execute: async ({ context: { entity, id } }) => {
+  execute: timed("get_entity", async ({ context: { entity, id } }) => {
     if (entity === "candidate") {
       const c = await db.candidate.findUnique({ where: { id }, include: {
         skills: { include: { skill: true } },
@@ -123,7 +135,7 @@ export const getEntity = createTool({
       interviewer: true, feedback: { include: { competencies: true } },
       application: { include: { candidate: true, job: { include: { company: true } } } } } });
     return { entity, url: `/interviews/${id}`, asOf: asOf(), data: i };
-  },
+  }),
 });
 
 export const queryMetrics = createTool({
@@ -139,8 +151,8 @@ export const queryMetrics = createTool({
     rows: z.array(z.object({ dimension: z.string().nullable(), value: z.number().nullable() })),
     ambiguous: z.array(z.string()),
   }),
-  execute: async ({ context: { metric, dimensions, filters, window } }) =>
-    runMetric(metric as any, (dimensions ?? []) as any, filters ?? {}, window),
+  execute: timed("query_metrics", async ({ context: { metric, dimensions, filters, window } }) =>
+    runMetric(metric as any, (dimensions ?? []) as any, filters ?? {}, window)),
 });
 
 export const queryEntities = createTool({
@@ -148,6 +160,12 @@ export const queryEntities = createTool({
   description: "Ranked list of records — 'top N', 'who', 'which', 'list'. Returns rows already ordered, plus the ranking definition used. Use query_metrics instead for counts and averages. " +
     "sort.by='job_fit' (needs filters.jobId or filters.jobTitle) ranks the entire candidate pool by skill match to that job's requirements — regardless of whether they've applied. Use it for " +
     "'who fits this role' / sourcing questions; use the default 'strength' for 'top candidates for this role' among people already in the pipeline. " +
+    "Add filters.candidateId to a job_fit call to get one named person's fit score directly — the ranked list caps at 25 rows, so a specific person's score ('what's Umar's fit for job A') " +
+    "can be missing from it if they don't rank in the top 25; filters.candidateId returns their score regardless of rank. Resolve the id with search_entities first. " +
+    "job_fit has two distinct modes and the caller must pick deliberately, because they answer different recruiter questions: filters.jobId alone ranks the ENTIRE candidate pool " +
+    "regardless of application status — 'who's the best fit for this role' / sourcing people worth reaching out to who haven't applied. Adding filters.stage narrows that same ranking " +
+    "to only this job's own applicants already at that stage — 'top 3 fit among people who applied' / shortlisting who's already in the pipeline for an interview decision. " +
+    "Do not add filters.stage unless the question explicitly scopes to applicants/pipeline/a stage; default to the whole-pool mode. " +
     "filters.skills (with filters.skillMatch: 'all' or 'any', default 'all') filters the whole candidate pool by named skills, independent of any job — use for 'who knows React and Node'.",
   inputSchema: z.object({
     entity: z.enum(["candidate","job","interview","application"]).default("candidate"),
@@ -170,7 +188,7 @@ export const queryEntities = createTool({
     resolved: z.object({ company: z.string().nullable(), window: z.any(), sortDefinition: z.string(), asOf: z.string(), ambiguous: z.array(z.string()) }),
     buckets: z.any().optional(),
   }),
-  execute: async ({ context }) => {
+  execute: timed("query_entities", async ({ context }) => {
     const res = await runEntityQuery(context as any);
     // Pipeline buckets describe applicants; meaningless for job_fit, which ranks the whole
     // candidate pool regardless of who's applied — attaching them there would just hand the
@@ -178,7 +196,7 @@ export const queryEntities = createTool({
     const buckets = context.filters?.jobId && context.sort?.by !== "job_fit"
       ? await pipelineBuckets(context.filters.jobId) : undefined;
     return { ...res, buckets };
-  },
+  }),
 });
 
 // Keys must match each tool's `id` — Mastra reports tool calls by this object key, not by `id`.

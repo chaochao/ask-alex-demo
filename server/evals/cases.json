@@ -32,6 +32,12 @@
   { "id": "job-fit-sourcing",
     "question": "Who best fits the Senior Software Engineer, Product role at Acme Robotics, regardless of whether they've applied?",
     "expect": { "tools": ["query_entities"], "answerContains": ["Farid Fischer"] } },
+  { "id": "job-fit-applied-only",
+    "question": "Give me the top 3 candidates who best fit the Senior Software Engineer, Product role at Acme Robotics, among people who've already applied to this job.",
+    "expect": { "tools": ["query_entities"], "answerContains": ["Tara Chen"] } },
+  { "id": "job-fit-whole-pool",
+    "question": "Give me the top 3 candidates who best fit the Senior Software Engineer, Product role at Acme Robotics, from the whole candidate pool — including people who've never applied to this job.",
+    "expect": { "tools": ["query_entities"], "answerContains": ["Liam Ibrahim"] } },
   { "id": "skills-filter-and", "question": "Who in our whole candidate pool knows both React and Node?",
     "expect": { "tools": ["query_entities"], "answerContains": ["Cara Esposito"] } }
 ]
