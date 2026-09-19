@@ -140,7 +140,11 @@ export const getEntity = createTool({
 
 export const queryMetrics = createTool({
   id: "query_metrics",
-  description: `Compute a defined metric. Use for any count, rate or average. Metrics: ${METRIC_NAMES.join(", ")}.`,
+  description: `Compute a defined metric. Use for any count, rate or average. Metrics: ${METRIC_NAMES.join(", ")}. ` +
+    "For a rate or average metric, rows[].n is exactly how many records that value was computed over — state it when " +
+    "reporting the metric. Never state a sample size for one metric using a count from a different tool call or a " +
+    "different metric (e.g. a pipeline bucket's count, or another metric's n) — they filter differently and can " +
+    "legitimately disagree; n is null when a metric has no meaningful denominator (plain counts).",
   inputSchema: z.object({
     metric: z.enum(METRIC_NAMES),
     dimensions: z.array(z.enum(DIMENSIONS)).max(1).optional(),
@@ -148,7 +152,7 @@ export const queryMetrics = createTool({
   }),
   outputSchema: z.object({
     metric: z.string(), definition: z.string(), asOf: z.string(),
-    rows: z.array(z.object({ dimension: z.string().nullable(), value: z.number().nullable() })),
+    rows: z.array(z.object({ dimension: z.string().nullable(), value: z.number().nullable(), n: z.number().nullable() })),
     ambiguous: z.array(z.string()),
   }),
   execute: timed("query_metrics", async ({ context: { metric, dimensions, filters, window } }) =>

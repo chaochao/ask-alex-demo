@@ -364,7 +364,7 @@ async function countCandidates(filters: Filters, dimension?: Dimension) {
   const rows = await db.$queryRawUnsafe<any[]>(sql, ...params);
   return {
     metric: "candidates_count" as MetricName, definition: METRICS.candidates_count.definition, asOf: asOf(),
-    rows: rows.map((r) => ({ dimension: r.dimension === null ? null : String(r.dimension), value: Number(r.value) })),
+    rows: rows.map((r) => ({ dimension: r.dimension === null ? null : String(r.dimension), value: Number(r.value), n: null })),
     ambiguous: [] as string[],
   };
 }
@@ -402,6 +402,12 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
     where.push("a.jobId = ?"); params.push(m[0].id);
   }
 
+  // FeedbackCompetency is one row per competency per interview (4-5 per completed interview) —
+  // joining it unconditionally fans out every other row in this query, silently weighting
+  // AVG(f.scoreRaw) (avg_score) and AVG(julianday(...)) (time_to_first_interview_days) by how many
+  // competencies each interview happened to have, instead of averaging one value per interview.
+  // Only join it when a metric or dimension actually needs a per-competency row.
+  const needsCompetency = metric === "competency_avg" || dimensions[0] === "competency";
   const base = `
     FROM Application a
     JOIN Candidate c ON c.id = a.candidateId
@@ -410,7 +416,7 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
     LEFT JOIN Interview i ON i.applicationId = a.id
     LEFT JOIN User u      ON u.id = i.interviewerId
     LEFT JOIN Feedback f  ON f.interviewId = i.id
-    LEFT JOIN FeedbackCompetency fc ON fc.feedbackId = f.id
+    ${needsCompetency ? "LEFT JOIN FeedbackCompetency fc ON fc.feedbackId = f.id" : ""}
     LEFT JOIN Offer o ON o.applicationId = a.id`;
 
   const EXPR: Record<MetricName, string> = {
@@ -431,6 +437,19 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   // Collapsing both cases to 0 below would make "nobody's interviewed yet" indistinguishable from
   // "everyone failed."
   const isRateMetric = ["pass_rate", "offer_rate", "offer_acceptance_rate", "avg_score", "time_to_first_interview_days", "competency_avg"].includes(metric);
+  // How many records actually fed a rate/average, so the model can state it truthfully instead of
+  // reusing an unrelated count from a different tool call (e.g. pipelineBuckets.ranked, which
+  // excludes rejected applications — avg_score does not) — a real bug caught live: the model
+  // reported avg_score as "computed from 5 candidates" when the query has no status filter at all
+  // and actually averaged over 7 scored interviews, including 2 from rejected applications.
+  const SAMPLE_SIZE_EXPR: Partial<Record<MetricName, string>> = {
+    avg_score: "COUNT(f.scoreRaw)",
+    pass_rate: "COUNT(DISTINCT CASE WHEN i.status = 'completed' THEN i.id END)",
+    offer_rate: "COUNT(DISTINCT a.id)",
+    offer_acceptance_rate: "COUNT(DISTINCT CASE WHEN o.respondedAt IS NOT NULL THEN o.id END)",
+    time_to_first_interview_days: "COUNT(CASE WHEN i.completedAt IS NOT NULL THEN 1 END)",
+    competency_avg: "COUNT(fc.score)",
+  };
   if (metric === "funnel_by_stage" && dimensions.length === 0) dimensions = ["stage"];
   if (win) {
     const col = win.field === "applied" ? "a.appliedAt" : win.field === "offer_extended" ? "o.extendedAt" : "i.completedAt";
@@ -438,7 +457,8 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   }
 
   const dimExpr = dimensions[0] ? DIM_SQL[dimensions[0]] : "NULL";
-  const sql = `SELECT ${dimExpr} AS dimension, ${EXPR[metric]} AS value ${base}
+  const sampleSizeExpr = SAMPLE_SIZE_EXPR[metric] ?? "NULL";
+  const sql = `SELECT ${dimExpr} AS dimension, ${EXPR[metric]} AS value, ${sampleSizeExpr} AS n ${base}
     ${where.length ? `WHERE ${where.map((w) => `(${w})`).join(" AND ")}` : ""}
     ${dimensions[0] ? `GROUP BY ${dimExpr} ORDER BY value DESC` : ""} LIMIT 50`;
   const rows = await db.$queryRawUnsafe<any[]>(sql, ...params);
@@ -447,6 +467,7 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
     rows: rows.map((r) => ({
       dimension: r.dimension === null ? null : String(r.dimension),
       value: r.value === null ? (isRateMetric ? null : 0) : Number(r.value),
+      n: r.n === null ? null : Number(r.n),
     })),
     ambiguous: [] as string[],
   };

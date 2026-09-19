@@ -36,6 +36,11 @@ Rules:
 - A rate or average row can come back with value: null — that means no data to compute it from
   (e.g. zero completed interviews in that group), not zero. Say so explicitly ("no completed
   interviews yet, rate not defined") — never report a null value as "0%".
+- If you state how many records a rate or average was computed over, that number must be that same
+  row's own n — never a count from a different tool call, a different metric, or a pipeline bucket
+  (e.g. pipelineBuckets.ranked). They apply different filters (ranked excludes rejected
+  applications; avg_score does not) and can legitimately disagree — reusing one for the other is
+  reporting a wrong number, not an approximation. If a row's n isn't there, don't state a count.
 - "How many candidates have current title X": query_metrics with metric=candidates_count and
   filters.currentTitle. This counts the Candidate table directly, not applications — it is the
   only metric that includes candidates with zero applications.
