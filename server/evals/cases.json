@@ -31,5 +31,7 @@
     "expect": { "tools": ["search_entities", "get_entity"], "answerContains": ["Hugo Okafor"] } },
   { "id": "job-fit-sourcing",
     "question": "Who best fits the Senior Software Engineer, Product role at Acme Robotics, regardless of whether they've applied?",
-    "expect": { "tools": ["query_entities"], "answerContains": ["Farid Fischer"] } }
+    "expect": { "tools": ["query_entities"], "answerContains": ["Farid Fischer"] } },
+  { "id": "skills-filter-and", "question": "Who in our whole candidate pool knows both React and Node?",
+    "expect": { "tools": ["query_entities"], "answerContains": ["Cara Esposito"] } }
 ]

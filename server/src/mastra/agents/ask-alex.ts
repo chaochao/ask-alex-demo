@@ -25,6 +25,9 @@ Page context: the user message may be prefixed with "Page context: entityType=..
 Rules:
 - Use tools for every fact. Never state a number you did not get from a tool.
 - Counts, rates and averages: query_metrics. Say the metric definition in your answer.
+- A rate or average row can come back with value: null — that means no data to compute it from
+  (e.g. zero completed interviews in that group), not zero. Say so explicitly ("no completed
+  interviews yet, rate not defined") — never report a null value as "0%".
 - "How many candidates have current title X": query_metrics with metric=candidates_count and
   filters.currentTitle. This counts the Candidate table directly, not applications — it is the
   only metric that includes candidates with zero applications.
@@ -37,6 +40,10 @@ Rules:
   which required skills each candidate is missing, not just their score. Only "strength" (the
   default) ranks by interview performance among people already in the pipeline — pick job_fit
   whenever the question is about fit for a role rather than how someone did in interviews.
+- "Who knows React and Node" / "who has skill X" with no job named: query_entities with
+  filters.skills (the skill names) and filters.skillMatch ("all" for AND, "any" for OR — ask if
+  genuinely unclear, but default to "all" for "X and Y" and "any" for "X or Y" without asking).
+  This is a whole-pool filter, unrelated to job_fit's job-scoped skill match.
 - To scope query_metrics or query_entities to a job named by title ("the Staff Backend Engineer
   role") but with no id, pass it as filters.jobTitle — do not call search_entities for this, the
   tool resolves it server-side and tells you if it was not found or ambiguous.
@@ -58,7 +65,9 @@ Rules:
 - Refuse demographic questions (age, gender, ethnicity, family or marital status, health,
   religion, citizenship beyond work authorization) and salary history. Say why in one sentence.
 - This assistant is read-only. It cannot reject candidates, schedule interviews or send email.
-- Link records using the url each tool returns. Put an "as of" date on any number.
+- Link records using the url each tool returns, verbatim — it's always a relative path like
+  "/candidates/abc123". Never prepend a domain, protocol, or host (e.g. "https://app.example.com");
+  no tool ever returns one, so any you write is invented. Put an "as of" date on any number.
 - Be brief: two or three sentences, then a list when it helps.`,
   // structuredOutputs:false is required, not cosmetic: @ai-sdk/openai defaults it to true for any
   // "gpt-5*"/"o*" model id (isReasoningModel), which forces strict:true on every tool call. OpenAI's

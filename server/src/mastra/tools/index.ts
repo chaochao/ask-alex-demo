@@ -16,6 +16,10 @@ const filters = z.object({
   source: z.string().optional(),
   minScore: z.number().min(0).max(100).optional(),
   location: z.enum(LOCATION_KEYS).optional(),
+  recruiterId: z.string().optional(),
+  recruiterName: z.string().optional(),
+  skills: z.array(z.string()).optional(),
+  skillMatch: z.enum(["all","any"]).optional(),
 }).optional();
 
 const windowSchema = z.object({
@@ -132,7 +136,7 @@ export const queryMetrics = createTool({
   }),
   outputSchema: z.object({
     metric: z.string(), definition: z.string(), asOf: z.string(),
-    rows: z.array(z.object({ dimension: z.string().nullable(), value: z.number() })),
+    rows: z.array(z.object({ dimension: z.string().nullable(), value: z.number().nullable() })),
     ambiguous: z.array(z.string()),
   }),
   execute: async ({ context: { metric, dimensions, filters, window } }) =>
@@ -143,7 +147,8 @@ export const queryEntities = createTool({
   id: "query_entities",
   description: "Ranked list of records — 'top N', 'who', 'which', 'list'. Returns rows already ordered, plus the ranking definition used. Use query_metrics instead for counts and averages. " +
     "sort.by='job_fit' (needs filters.jobId or filters.jobTitle) ranks the entire candidate pool by skill match to that job's requirements — regardless of whether they've applied. Use it for " +
-    "'who fits this role' / sourcing questions; use the default 'strength' for 'top candidates for this role' among people already in the pipeline.",
+    "'who fits this role' / sourcing questions; use the default 'strength' for 'top candidates for this role' among people already in the pipeline. " +
+    "filters.skills (with filters.skillMatch: 'all' or 'any', default 'all') filters the whole candidate pool by named skills, independent of any job — use for 'who knows React and Node'.",
   inputSchema: z.object({
     entity: z.enum(["candidate","job","interview","application"]).default("candidate"),
     filters, window: windowSchema,

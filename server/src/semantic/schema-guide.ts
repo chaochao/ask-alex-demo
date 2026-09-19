@@ -17,7 +17,10 @@ export const SCHEMA_GUIDE = `Data model:
   (the role they applied to). Filter on it with filters.currentTitle, never filters.jobTitle.
 - Application: links a Candidate to a Job. stage moves forward through
   applied → screening → interviewing → offer → hired, or rejected at any point.
-  One Application per (candidate, job) pair.
+  One Application per (candidate, job) pair. ownerId is the recruiter working that
+  application — filter on it with filters.recruiterId if you already have their id, or
+  filters.recruiterName ("Marc") to have it resolved server-side. This is the recruiter
+  owning the application, not necessarily the same person as the Job's own recruiter.
 - Interview: at most one per Application (one interview round in this demo). Has a
   round (screen, technical, hiring_manager, onsite) and status (scheduled, completed,
   no_show, cancelled).

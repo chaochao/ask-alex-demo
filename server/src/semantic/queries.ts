@@ -43,8 +43,8 @@ export function resolveWindow(w?: Window) {
 
 export type Filters = {
   company?: string; roleFamily?: string; jobId?: string; jobTitle?: string; stage?: string; round?: string;
-  interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string; location?: LocationKey;
-  currentTitle?: string;
+  interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string; recruiterName?: string;
+  location?: LocationKey; currentTitle?: string; skills?: string[]; skillMatch?: "all" | "any";
 };
 
 async function companyIdFromName(name: string) {
@@ -52,6 +52,13 @@ async function companyIdFromName(name: string) {
   const exact = await db.company.findFirst({ where: { OR: [{ id: name }, { slug }] } });
   if (exact) return [exact];
   return db.company.findMany({ where: { name: { contains: name.split(" ")[0] } } });
+}
+
+// Resolves a recruiter named by the model (never by it guessing a User id) — same reasoning as
+// companyIdFromName. Scoped to role='recruiter' so "Marc" doesn't also match an interviewer or
+// hiring manager who happens to share a first name.
+async function recruiterIdFromName(name: string) {
+  return db.user.findMany({ where: { role: "recruiter", OR: [{ id: name }, { name: { contains: name } }] } });
 }
 
 // Resolves a job named by title (never by the model guessing an id), scoped to a company
@@ -139,12 +146,59 @@ async function rankCandidatesByFit(f: Filters, limit: number) {
   };
 }
 
+// "Who has React and Node" is a whole-pool question, same reasoning as candidates_count and
+// job_fit: it has nothing to do with who's applied anywhere, so this queries Candidate directly
+// via CandidateSkill, never through Application.
+async function filterCandidatesBySkills(f: Filters, sortBy: string, limit: number) {
+  const names = [...new Set((f.skills ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  if (names.length === 0) return { rows: [], total: 0, resolved: { company: null, window: null, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
+
+  const skills = await db.skill.findMany({ where: { name: { in: names } } });
+  const found = new Set(skills.map((s) => s.name));
+  const missing = names.filter((n) => !found.has(n));
+  if (missing.length > 0) return { rows: [], total: 0, resolved: { company: null, window: null, sortDefinition: "", asOf: asOf(), ambiguous: missing.map((n) => `unknown skill: ${n}`) } };
+
+  const matchAll = f.skillMatch !== "any";
+  const skillIds = skills.map((s) => s.id);
+  const placeholders = skillIds.map(() => "?").join(",");
+  const having = matchAll ? `COUNT(DISTINCT cs.skillId) = ${skillIds.length}` : `COUNT(DISTINCT cs.skillId) >= 1`;
+  const ORDER: Record<string, string> = { years_experience: "c.yearsExperience DESC", name: "c.lastName ASC" };
+  const order = ORDER[sortBy] ?? ORDER.years_experience;
+
+  const rows = await db.$queryRawUnsafe<any[]>(`
+    SELECT c.id, c.firstName || ' ' || c.lastName AS label, c.currentTitle, c.yearsExperience
+    FROM Candidate c
+    JOIN CandidateSkill cs ON cs.candidateId = c.id AND cs.skillId IN (${placeholders})
+    GROUP BY c.id
+    HAVING ${having}
+    ORDER BY ${order}
+    LIMIT ?`, ...skillIds, limit);
+  const totalRow = await db.$queryRawUnsafe<any[]>(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT c.id FROM Candidate c
+      JOIN CandidateSkill cs ON cs.candidateId = c.id AND cs.skillId IN (${placeholders})
+      GROUP BY c.id HAVING ${having})`, ...skillIds);
+
+  return {
+    rows: rows.map((r) => ({
+      id: r.id, label: r.label, url: `/candidates/${r.id}`,
+      sortValue: r.yearsExperience ?? null,
+      context: { currentTitle: r.currentTitle, yearsExperience: r.yearsExperience },
+    })),
+    total: Number(totalRow[0]?.n ?? 0),
+    resolved: { company: null, window: null,
+      sortDefinition: `has ${matchAll ? "all" : "any"} of: ${names.join(", ")}`,
+      asOf: asOf(), ambiguous: [] as string[] },
+  };
+}
+
 /** Ranked list of records. Filters and sort keys are enum-bound; every value is parameterized. */
 export async function runEntityQuery(input: {
   entity: "candidate" | "job" | "interview" | "application";
   filters?: Filters; window?: Window; sort: { by: string; dir?: "asc" | "desc" }; limit?: number;
 }) {
   if (input.sort.by === "job_fit") return rankCandidatesByFit(input.filters ?? {}, Math.min(input.limit ?? 10, 25));
+  if (input.filters?.skills?.length) return filterCandidatesBySkills(input.filters, input.sort.by, Math.min(input.limit ?? 10, 25));
   const f = input.filters ?? {};
   const win = resolveWindow(input.window);
   const limit = Math.min(input.limit ?? 10, 25);
@@ -154,7 +208,8 @@ export async function runEntityQuery(input: {
   let resolvedCompanyId: string | undefined;
 
   const company = clean(f.company), jobTitle = clean(f.jobTitle), jobId = clean(f.jobId),
-        source = clean(f.source), recruiterId = clean(f.recruiterId);
+        source = clean(f.source), recruiterName = clean(f.recruiterName);
+  let recruiterId = clean(f.recruiterId);
 
   if (company) {
     const matches = await companyIdFromName(company);
@@ -175,6 +230,12 @@ export async function runEntityQuery(input: {
   if (f.stage)      { where.push("a.stage = ?");             params.push(f.stage); }
   if (f.round)      { where.push("i.round = ?");             params.push(f.round); }
   if (source)       { where.push("c.source = ?");            params.push(source); }
+  if (!recruiterId && recruiterName) {
+    const matches = await recruiterIdFromName(recruiterName);
+    if (matches.length === 0) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: win, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
+    if (matches.length > 1) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: win, sortDefinition: "", asOf: asOf(), ambiguous: matches.map((m) => m.name) } };
+    recruiterId = matches[0].id;
+  }
   if (recruiterId)  { where.push("a.ownerId = ?");           params.push(recruiterId); }
   if (f.minScore)   { where.push("f.scoreRaw >= ?");         params.push(f.minScore); }
   if (f.location)   { where.push("c.location LIKE ?");       params.push(`%${LOCATION_ALIASES[f.location]}%`); }
@@ -293,12 +354,20 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   const dim = dimensions[0] ? DIM_SQL[dimensions[0]] : "NULL";
   const where: string[] = []; const params: unknown[] = [];
   const jobId = clean(filters.jobId), source = clean(filters.source),
-        company = clean(filters.company), jobTitle = clean(filters.jobTitle);
+        company = clean(filters.company), jobTitle = clean(filters.jobTitle),
+        recruiterName = clean(filters.recruiterName);
+  let recruiterId = clean(filters.recruiterId);
   if (jobId)               { where.push("a.jobId = ?");      params.push(jobId); }
   if (filters.roleFamily)  { where.push("j.roleFamily = ?"); params.push(filters.roleFamily); }
   if (filters.stage)       { where.push("a.stage = ?");      params.push(filters.stage); }
   if (source)              { where.push("c.source = ?");     params.push(source); }
   if (filters.location)    { where.push("c.location LIKE ?"); params.push(`%${LOCATION_ALIASES[filters.location]}%`); }
+  if (!recruiterId && recruiterName) {
+    const m = await recruiterIdFromName(recruiterName);
+    if (m.length !== 1) return { metric, definition: METRICS[metric].definition, asOf: asOf(), rows: [], ambiguous: m.map((x) => x.name) };
+    recruiterId = m[0].id;
+  }
+  if (recruiterId)          { where.push("a.ownerId = ?");   params.push(recruiterId); }
   let resolvedCompanyId: string | undefined;
   if (company) {
     const m = await companyIdFromName(company);
@@ -335,6 +404,12 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
     competency_avg:       "ROUND(AVG(fc.score), 2)",
     candidates_count:     "COUNT(DISTINCT c.id)", // unreachable: candidates_count returns via countCandidates() above
   };
+  // Rate/average metrics can genuinely have no defined value for a group (zero completed
+  // interviews, zero offers) — that's NULL from SQL (via NULLIF or AVG() over an empty set), and
+  // it means "no data," not "0". Count metrics don't have this ambiguity: zero really is zero.
+  // Collapsing both cases to 0 below would make "nobody's interviewed yet" indistinguishable from
+  // "everyone failed."
+  const isRateMetric = ["pass_rate", "offer_rate", "offer_acceptance_rate", "avg_score", "time_to_first_interview_days", "competency_avg"].includes(metric);
   if (metric === "funnel_by_stage" && dimensions.length === 0) dimensions = ["stage"];
   if (win) {
     const col = win.field === "applied" ? "a.appliedAt" : win.field === "offer_extended" ? "o.extendedAt" : "i.completedAt";
@@ -348,7 +423,10 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   const rows = await db.$queryRawUnsafe<any[]>(sql, ...params);
   return {
     metric, definition: METRICS[metric].definition, asOf: asOf(), window: win,
-    rows: rows.map((r) => ({ dimension: r.dimension === null ? null : String(r.dimension), value: r.value === null ? 0 : Number(r.value) })),
+    rows: rows.map((r) => ({
+      dimension: r.dimension === null ? null : String(r.dimension),
+      value: r.value === null ? (isRateMetric ? null : 0) : Number(r.value),
+    })),
     ambiguous: [] as string[],
   };
 }
