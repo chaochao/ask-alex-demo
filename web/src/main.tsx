@@ -58,10 +58,15 @@ const WARM_BADGE_TONE: Record<string, string> = {
   cancelled: "bg-[var(--warm-tan)] text-[var(--warm-ink)]",
 };
 
+// Display text only — the underlying stage value stays "offer" everywhere else (schema, queries,
+// tools, evals). "Offer" reads as "they accepted," which isn't what this stage means: it's
+// extended, decision pending. Acceptance lives on Offer.status and the separate "hired" stage.
+const STAGE_DISPLAY_LABEL: Record<string, string> = { offer: "decision" };
+
 function WarmBadge({ status }: { status: string }) {
   return (
     <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs capitalize", WARM_BADGE_TONE[status] ?? "bg-[var(--warm-tan)] text-[var(--warm-ink)]")}>
-      {status.replace(/_/g, " ")}
+      {STAGE_DISPLAY_LABEL[status] ?? status.replace(/_/g, " ")}
     </span>
   );
 }
@@ -154,7 +159,7 @@ function NavLink({ to, path, icon: Icon, children }: { to: string; path: string;
 }
 
 function Shell() {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const state = useRouterState();
   const path = state.location.pathname;
   const [ctx, setCtx] = useState<{ entityType?: string; entityId?: string; label?: string }>({});
@@ -251,7 +256,7 @@ function Jobs() {
   const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
-    <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+    <div className="warm-theme space-y-6 rounded-[1rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="warm-heading text-4xl sm:text-5xl">Jobs</h1>
@@ -280,7 +285,7 @@ function Jobs() {
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-[2rem] bg-[var(--warm-tan)]">
+      <div className="overflow-hidden rounded-[1rem] bg-[var(--warm-tan)]">
         <Table>
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
@@ -315,11 +320,11 @@ function StageStatCard({ stage, value }: { stage: string; value: number }) {
   const theme = STAGE_CARD_THEME[stage] ?? STAGE_CARD_THEME.applied;
   const Icon = theme.icon;
   return (
-    <Card size="sm" className={cn("rounded-[2rem] border-0 shadow-none", theme.bg, theme.border && "ring-1 ring-[var(--warm-border)]")}>
+    <Card size="sm" className={cn("rounded-[1rem] border-0 shadow-none", theme.bg, theme.border && "ring-1 ring-[var(--warm-border)]")}>
       <CardContent className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <div className={cn("warm-heading text-3xl", theme.ink)}>{value}</div>
-          <div className={cn("text-xs opacity-80", theme.ink)}>{stage.replace(/_/g, " ")}</div>
+          <div className={cn("text-xs opacity-80", theme.ink)}>{STAGE_DISPLAY_LABEL[stage] ?? stage.replace(/_/g, " ")}</div>
         </div>
         <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full", theme.iconBg, theme.iconInk)}>
           <Icon className="size-4" />
@@ -474,14 +479,15 @@ function JobDetail() {
   const { data: j } = useQuery({ queryKey: ["job", jobId], queryFn: () => api<any>(`/api/jobs/${jobId}`) });
   if (!j) return <Loading />;
   const ranked = [...j.applications]
-    .filter((a: any) => a.interview?.feedback)
-    .sort((a: any, b: any) => b.interview.feedback.scoreRaw - a.interview.feedback.scoreRaw);
+    .filter((a: any) => a.interview)
+    .sort((a: any, b: any) => (b.interview.feedback?.scoreRaw ?? -Infinity) - (a.interview.feedback?.scoreRaw ?? -Infinity));
   const byStage: Record<string, number> = Object.fromEntries(j.byStage.map((s: any) => [s.dimension, s.value]));
   const stageCards = STAGE_ORDER.filter((s) => byStage[s] != null).map((s) => ({ stage: s, value: byStage[s] }));
   return (
-    <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+    <div className="warm-theme space-y-8 rounded-[1rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="space-y-1">
         <h1 className="warm-heading text-4xl sm:text-5xl">{j.title}</h1>
+        <p className="warm-heading text-xl opacity-80">{j.company.name}</p>
         <p className="text-sm opacity-70">
           {j.seniority} · {j.location} · {money(j.salaryMinCents)}–{money(j.salaryMaxCents)} · recruiter {j.recruiter.name}
         </p>
@@ -495,7 +501,7 @@ function JobDetail() {
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_22rem]">
-        <div className="space-y-8">
+        <div className="min-w-0 space-y-8">
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Requirements</h2>
             <div className="space-y-2">
@@ -515,22 +521,27 @@ function JobDetail() {
 
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Description</h2>
-            <div className="rounded-[2rem] bg-[var(--warm-tan)] p-6">
+            <div className="rounded-[1rem] bg-[var(--warm-tan)] p-6">
               <WarmDescription text={j.description} />
             </div>
           </section>
 
           <section>
-            <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Scored candidates</h2>
-            <div className="overflow-hidden rounded-[2rem] border border-[var(--warm-border)]">
+            <h2 className="text-xs font-medium tracking-wide uppercase opacity-60">Interview results</h2>
+            <p className="mb-3 text-xs opacity-60">
+              Every application with an interview on record, in any stage — including ones with no
+              score yet because the interview hasn't happened, was cancelled, or was a no-show.
+            </p>
+            <div className="overflow-hidden rounded-[1rem] border border-[var(--warm-border)]">
               <Table>
                 <TableHeader>
                   <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
                     <TableHead className="text-[var(--warm-ink)] opacity-60">Candidate</TableHead>
                     <TableHead className="text-[var(--warm-ink)] opacity-60">Stage</TableHead>
                     <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Interview status</TableHead>
                     <TableHead className="text-[var(--warm-ink)] opacity-60">Score</TableHead>
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Interviewed</TableHead>
+                    <TableHead className="text-[var(--warm-ink)] opacity-60">Date</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -543,11 +554,16 @@ function JobDetail() {
                       </TableCell>
                       <TableCell><WarmBadge status={a.stage} /></TableCell>
                       <TableCell className="opacity-70 capitalize">{a.interview.round.replace(/_/g, " ")}</TableCell>
+                      <TableCell><WarmBadge status={a.interview.status} /></TableCell>
                       <TableCell className="tabular-nums">
-                        <span className="warm-heading">{a.interview.feedback.overallScore}</span>{" "}
-                        <span className="opacity-60">({a.interview.feedback.scoreRaw.toFixed(1)})</span>
+                        {a.interview.feedback ? (
+                          <>
+                            <span className="warm-heading">{a.interview.feedback.overallScore}</span>{" "}
+                            <span className="opacity-60">({a.interview.feedback.scoreRaw.toFixed(1)})</span>
+                          </>
+                        ) : <span className="opacity-60">—</span>}
                       </TableCell>
-                      <TableCell className="opacity-70">{date(a.interview.completedAt)}</TableCell>
+                      <TableCell className="opacity-70">{date(a.interview.completedAt ?? a.interview.scheduledAt)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -556,7 +572,7 @@ function JobDetail() {
           </section>
         </div>
 
-        <section className="lg:sticky lg:top-20 lg:self-start">
+        <section className="min-w-0 lg:sticky lg:top-20 lg:self-start">
           <h2 className="mb-3 flex items-center gap-1.5 text-xs font-medium tracking-wide uppercase opacity-60">
             <Sparkles className="size-3.5" /> Generated questions
           </h2>
@@ -565,7 +581,7 @@ function JobDetail() {
           ) : (
             <div className="space-y-3">
               {j.questions.map((q: any) => (
-                <div key={q.id} className="space-y-2 rounded-[1.25rem] border border-[var(--warm-border)] bg-[var(--warm-bg)] p-4">
+                <div key={q.id} className="space-y-2 rounded-[1rem] border border-[var(--warm-border)] bg-[var(--warm-bg)] p-4">
                   <span className="inline-flex rounded-full bg-[var(--warm-tan)] px-2.5 py-0.5 text-xs capitalize">{q.category.replace(/_/g, " ")}</span>
                   <p className="text-sm">{q.text}</p>
                 </div>
@@ -611,7 +627,7 @@ function Candidates() {
   const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
-    <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+    <div className="warm-theme space-y-6 rounded-[1rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="warm-heading text-4xl sm:text-5xl">Candidates</h1>
@@ -640,7 +656,7 @@ function Candidates() {
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-[2rem] bg-[var(--warm-tan)]">
+      <div className="overflow-hidden rounded-[1rem] bg-[var(--warm-tan)]">
         <Table>
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
@@ -680,7 +696,7 @@ function CandidateDetail() {
   const { data: c } = useQuery({ queryKey: ["candidate", candidateId], queryFn: () => api<any>(`/api/candidates/${candidateId}`) });
   if (!c) return <Loading />;
   return (
-    <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+    <div className="warm-theme space-y-8 rounded-[1rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="space-y-1">
         <h1 className="warm-heading flex flex-wrap items-center gap-2 text-4xl sm:text-5xl">
           {c.firstName} {c.lastName} <WarmBadge status={c.status} />
@@ -709,7 +725,7 @@ function CandidateDetail() {
       </section>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_22rem]">
-        <div className="space-y-8">
+        <div className="min-w-0 space-y-8">
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Skills</h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -718,6 +734,44 @@ function CandidateDetail() {
               ))}
             </div>
           </section>
+
+          {c.applications.some((a: any) => a.interview) && (
+            <section>
+              <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Interviews</h2>
+              <div className="overflow-hidden rounded-[1rem] border border-[var(--warm-border)]">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
+                      <TableHead className="text-[var(--warm-ink)] opacity-60">Job</TableHead>
+                      <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
+                      <TableHead className="text-[var(--warm-ink)] opacity-60">Status</TableHead>
+                      <TableHead className="text-[var(--warm-ink)] opacity-60">Score</TableHead>
+                      <TableHead className="text-[var(--warm-ink)] opacity-60">Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {c.applications.filter((a: any) => a.interview).map((a: any) => (
+                      <TableRow key={a.interview.id} className="border-[var(--warm-border)] hover:bg-[var(--warm-tan)]/40">
+                        <TableCell className="font-medium">
+                          <Link to="/interviews/$interviewId" params={{ interviewId: a.interview.id }} className="hover:underline">
+                            {a.job.title} <span className="opacity-60">— {a.job.company.name}</span>
+                          </Link>
+                        </TableCell>
+                        <TableCell className="opacity-70 capitalize">{a.interview.round.replace(/_/g, " ")}</TableCell>
+                        <TableCell><WarmBadge status={a.interview.status} /></TableCell>
+                        <TableCell className="tabular-nums">
+                          {a.interview.feedback ? (
+                            <span className="warm-heading">{a.interview.feedback.overallScore}</span>
+                          ) : <span className="opacity-60">—</span>}
+                        </TableCell>
+                        <TableCell className="opacity-70">{date(a.interview.completedAt ?? a.interview.scheduledAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </section>
+          )}
 
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Applications</h2>
@@ -757,13 +811,13 @@ function CandidateDetail() {
 
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Resume</h2>
-            <div className="rounded-[2rem] bg-[var(--warm-tan)] p-6">
+            <div className="rounded-[1rem] bg-[var(--warm-tan)] p-6">
               <p className="text-sm text-[var(--warm-body)]">{c.resumeText}</p>
             </div>
           </section>
         </div>
 
-        <section className="lg:sticky lg:top-20 lg:self-start">
+        <section className="min-w-0 lg:sticky lg:top-20 lg:self-start">
           <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Recent activity</h2>
           <ul className="space-y-4 border-l border-[var(--warm-border)] pl-4">
             {c.activities.map((a: any) => (
@@ -814,7 +868,7 @@ function Interviews() {
   const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
-    <div className="warm-theme space-y-6 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+    <div className="warm-theme space-y-6 rounded-[1rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="warm-heading text-4xl sm:text-5xl">Interviews</h1>
@@ -845,7 +899,7 @@ function Interviews() {
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-[2rem] bg-[var(--warm-tan)]">
+      <div className="overflow-hidden rounded-[1rem] bg-[var(--warm-tan)]">
         <Table>
           <TableHeader>
             <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
@@ -889,10 +943,13 @@ function InterviewDetail() {
   const { data: i } = useQuery({ queryKey: ["interview", interviewId], queryFn: () => api<any>(`/api/interviews/${interviewId}`) });
   if (!i) return <Loading />;
   return (
-    <div className="warm-theme space-y-8 rounded-[2rem] bg-[var(--warm-bg)] p-6 sm:p-8">
+    <div className="warm-theme space-y-8 rounded-[1rem] bg-[var(--warm-bg)] p-6 sm:p-8">
       <div className="space-y-1">
         <h1 className="warm-heading text-4xl sm:text-5xl capitalize">
-          {i.application.candidate.firstName} {i.application.candidate.lastName} — {i.round.replace(/_/g, " ")}
+          <Link to="/candidates/$candidateId" params={{ candidateId: i.application.candidate.id }} className="hover:underline">
+            {i.application.candidate.firstName} {i.application.candidate.lastName}
+          </Link>{" "}
+          — {i.round.replace(/_/g, " ")}
         </h1>
         <p className="flex flex-wrap items-center gap-2 text-sm opacity-70">
           {i.application.job.company.name} · {i.application.job.title} · {i.interviewer.name} · {date(i.completedAt ?? i.scheduledAt)} <WarmBadge status={i.status} />
@@ -901,7 +958,7 @@ function InterviewDetail() {
 
       {i.feedback ? (
         <div className="space-y-8">
-          <div className="flex flex-wrap items-center gap-6 rounded-[2rem] bg-[var(--warm-tan)] p-6">
+          <div className="flex flex-wrap items-center gap-6 rounded-[1rem] bg-[var(--warm-tan)] p-6">
             <ScoreRing value={i.feedback.overallScore} />
             <div className="space-y-2">
               <h2 className="warm-heading text-2xl capitalize">{i.feedback.recommendation.replace(/_/g, " ")}</h2>
@@ -921,7 +978,7 @@ function InterviewDetail() {
 
           <section>
             <h2 className="mb-3 text-xs font-medium tracking-wide uppercase opacity-60">Notes</h2>
-            <div className="space-y-2 rounded-[2rem] bg-[var(--warm-tan)] p-6">
+            <div className="space-y-2 rounded-[1rem] bg-[var(--warm-tan)] p-6">
               <p className="text-sm text-[var(--warm-body)]">{i.feedback.notes}</p>
               <p className="text-xs opacity-60">{i.interviewer.name} · {date(i.completedAt ?? i.scheduledAt)}</p>
             </div>

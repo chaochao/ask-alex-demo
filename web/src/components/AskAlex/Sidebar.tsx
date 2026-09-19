@@ -14,8 +14,12 @@ type Msg = { role: "user" | "assistant"; text: string; questions?: Question[]; s
 // turn those into clickable links instead of leaving them as inert text the user has to copy.
 const APP_LINK_RE = /(\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+)/g;
 const IS_APP_LINK = /^\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+$/;
+// The model occasionally invents a domain in front of a real relative path (no tool ever returns
+// one) — strip it before linkifying so a hallucinated "https://app.example.com" never shows up
+// next to the correct link.
+const FAKE_HOST_RE = /https?:\/\/\S*?(?=\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+)/g;
 function linkify(text: string) {
-  return text.split(APP_LINK_RE).map((part, i) =>
+  return text.replace(FAKE_HOST_RE, "").split(APP_LINK_RE).map((part, i) =>
     IS_APP_LINK.test(part)
       ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:opacity-80">{part}</a>
       : <span key={i}>{part}</span>

@@ -3,6 +3,65 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-18/19 — dead recruiter filter, pass-rate null-vs-zero bug, whole-pool skills filter
+
+**`filters.recruiterId` was dead code.** Fully wired into `queries.ts` SQL (`a.ownerId = ?`) but
+never added to the tool's actual zod schema, so the model had no way to ever set it — "how's
+Marc's pipeline doing" was structurally unanswerable, not because the query couldn't do it but
+because the parameter that would trigger it didn't exist on the tool call. Added
+`filters.recruiterName` too (resolved server-side via a new `recruiterIdFromName()`, same pattern
+as `companyIdFromName`), wired into both `runEntityQuery` and `runMetric` (the latter never
+supported recruiter filtering at all before this). Verified live: "how many applications does
+Marc Oyelaran own" → 59, matching a direct `db.application.count({ ownerId })`.
+
+**Pass rate showing 0% meant two different things and looked identical.** Asked "what's the pass
+rate for each stage" on a job — `applied: 0%` and `screening: 0%` sat right next to `rejected: 0%`
+with no way to tell that the first two mean "no completed interviews yet" (mathematically
+undefined) while the third is a real, computed zero (2 completed interviews, both rated
+negatively). Root cause: `runMetric`'s row mapping collapsed every SQL `NULL` (from `NULLIF(...,
+0)` or `AVG()` over zero rows) into `0`, for every metric alike. Fixed by only doing that
+collapse for count-type metrics (`applications_count`, `interviews_completed`, `funnel_by_stage`)
+— rate/average metrics (`pass_rate`, `offer_rate`, `offer_acceptance_rate`, `avg_score`,
+`time_to_first_interview_days`, `competency_avg`) now pass `null` through, and the agent is
+instructed to say "rate not defined" instead of a misleading `0%`. Required loosening
+`query_metrics`'s output schema (`value: z.number()` → `.nullable()`) too.
+
+**Added `filters.skills` / `filters.skillMatch`** ("all" = AND, "any" = OR) to `query_entities` —
+"who knows React and Node" is a whole-pool question, same reasoning as `candidates_count` and
+`job_fit` before it: it has nothing to do with who's applied anywhere, so a new candidate-native
+function (`filterCandidatesBySkills`, same shape as `rankCandidatesByFit`) queries `Candidate` via
+`CandidateSkill` directly. Still not a new tool — the running rule from `job_fit` held: a new
+question shape becomes a new parameter on an existing generic tool, not a new tool verb. Verified
+live end-to-end (AND match on react+node → Cara Esposito, 14y exp, matching a direct SQL check).
+
+**A hallucinated absolute URL.** The agent wrote `https://app.example.com/candidates/...` in an
+answer — no tool has ever returned anything but a relative path (`/candidates/{id}`), so the
+domain was invented outright. Fixed at both layers: tightened the "link records" instruction to
+say the url must be used verbatim with no domain/protocol ever added, and added a frontend regex
+(`Sidebar.tsx`) that strips a fake `http(s)://host` prefix immediately before a real
+`/candidates|jobs|interviews/id` path before linkifying — so even a repeat hallucination won't
+render as a broken-looking mixed string.
+
+**Investigated whether `round` and `stage` have a real relationship — they don't, in this seed.**
+User found `round: "screen"` on an interview whose application was now `stage: "rejected"` and
+asked what the relationship was supposed to be. Traced it to `seed.ts:188`: `round` is chosen by
+`pick([...])` completely independently of `stage`, and confirmed against the full distribution —
+every round type appears at every terminal stage with no pattern. Discussed a real multi-round
+redesign (dropping `@@unique([applicationId])`, one `Interview` row per round in sequence) versus
+a smaller fix (just correlate `round` with `stage` in the seed). Decided: leave it alone for now —
+"it's only a demo," and the invariant is explicitly flagged in `CLAUDE.md` as one not to quietly
+change.
+
+**Frontend**: candidate name on the interview detail page links to their candidate page; added an
+"Interviews" section to the candidate page listing every interview with a link to its detail page;
+sidebar no longer defaults open on page load; reduced `rounded-[2rem]` to `rounded-[1rem]`
+app-wide (all 15 occurrences) after a user-reported table corner visibly clipping into header
+cell content at that radius; "offer" stage relabeled "Decision" for display only (the stored value
+is still `"offer"` everywhere — `hired` and `Offer.status` already carry the actual accept/decline
+outcome, so the display text was the only thing actually wrong).
+
+Added one eval case (`skills-filter-and`). Suite is 16 cases now.
+
 ## 2026-09-18 — two more query_entities correctness bugs, plus a job_fit sourcing sort
 
 **"Who are the rejected candidates for this job" returned zero rows despite the job page showing
