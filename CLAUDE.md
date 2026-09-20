@@ -19,7 +19,10 @@ Files written from documentation, not from a running install — verify them fir
 - The model never writes SQL. Queries live in `server/src/semantic/queries.ts`, parameterized.
 - Metrics are defined once in `server/src/semantic/metrics.ts`. A metric that isn't there is unanswerable.
 - One interview per application (`@@unique([applicationId])`); every completed interview has one Feedback row.
-- Ranking = stage, then `scoreRaw`, then recency. The answer must state the rule it used.
+- Ranking: the answer must always state the rule it used. `strength`'s real design (PLAN.md 5d) is
+  stage, then `scoreRaw`, then recency — currently overridden to score-only (`scoreRaw`, then
+  recency) as an explicit, requested demo simplification (`queries.ts`, `ORDER.strength`); restore
+  the stage-first version by putting `STAGE_RANK DESC` back as its leading sort term.
 - Tools return small structured results, never raw row dumps. Cap 25 rows.
 - Read-only. No write tools.
 - Seed RNG is fixed — evals depend on the data being identical.

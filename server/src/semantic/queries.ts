@@ -276,8 +276,12 @@ export async function runEntityQuery(input: {
     where.push(`${col} >= ? AND ${col} < ?`); params.push(win.from, win.to);
   }
 
+  // ponytail: demo simplification, requested explicitly — "strength" normally ranks stage first
+  // (PLAN.md 5d, CLAUDE.md's "don't quietly change" invariant), dropped here to score-only so a
+  // top-N answer is trivial to eyeball-verify. Restore `${STAGE_RANK} DESC, ` as the leading term
+  // to bring stage-first ranking back.
   const ORDER: Record<string, string> = {
-    strength: `${STAGE_RANK} DESC, f.scoreRaw DESC, i.completedAt DESC`,
+    strength: `f.scoreRaw DESC, i.completedAt DESC`,
     score: `f.scoreRaw DESC, i.completedAt DESC`,
     most_recent_interview: `i.completedAt DESC`,
     years_experience: `c.yearsExperience DESC`,
@@ -287,7 +291,7 @@ export async function runEntityQuery(input: {
   };
   const order = ORDER[input.sort.by] ?? ORDER.strength;
   const SORT_DEF: Record<string, string> = {
-    strength: "stage (offer > interviewing > screening > applied), then interview score, then most recent interview",
+    strength: "interview score (unrounded), then most recent interview — stage not factored in, demo simplification",
     score: "interview score (unrounded), then most recent interview",
     most_recent_interview: "most recent completed interview",
     years_experience: "years of experience",
@@ -381,6 +385,7 @@ export async function runMetric(metric: MetricName, dimensions: Dimension[] = []
   if (jobId)               { where.push("a.jobId = ?");      params.push(jobId); }
   if (filters.roleFamily)  { where.push("j.roleFamily = ?"); params.push(filters.roleFamily); }
   if (filters.stage)       { where.push("a.stage = ?");      params.push(filters.stage); }
+  if (filters.round)       { where.push("i.round = ?");      params.push(filters.round); }
   if (source)              { where.push("c.source = ?");     params.push(source); }
   if (filters.location)    { where.push("c.location LIKE ?"); params.push(`%${LOCATION_ALIASES[filters.location]}%`); }
   if (!recruiterId && recruiterName) {

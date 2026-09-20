@@ -3,6 +3,67 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-19 (cont'd) — job_fit defaults flipped, candidate cards in chat, a demo-only ranking simplification
+
+**job_fit's default is now "this job's applicants," not "the whole pool."** Live testing showed the
+old default ("whole pool unless the question says 'applicants'") forced a clarifying question on
+the single most common phrasing — "for people who apply this job, give me the top 3 job fit" —
+because it didn't lexically match either trigger. Flipped it: `job_fit` now defaults to
+`filters.stage: "applied"` immediately, and only drops to whole-pool mode when the question
+explicitly says so ("whole candidate pool," "regardless of who's applied," sourcing language).
+Updated in both `ask-alex.ts`'s instructions and `query_entities`'s tool description.
+**Caveat found while re-testing this same session**: the same neutral question ("who is the best
+job fit for the job") produced *opposite* defaults on two separate runs — one correctly used
+`stage: applied`, the other silently ran whole-pool. Confirmed this isn't a wiring bug (the tool
+call itself just omitted `filters.stage`) — it's genuine model non-determinism on a prompt-only
+default for a phrasing that doesn't lexically signal either mode. Not fixed; noted here rather than
+in the internals doc's "not fixed yet" list only because it was found and re-confirmed live today.
+
+**`strength` ranking simplified to score-only, as an explicit, requested demo simplification.**
+Real design (`PLAN.md` 5d) is stage-first, then `scoreRaw`, then recency — a documented "don't
+quietly change" invariant. Dropped the stage term anyway, on request, because stage-first ranking
+was producing "top 3" orderings a reader has to know the rule to verify (an `offer`-stage candidate
+with a *lower* score outranking an `interviewing`-stage candidate with a higher one) — this was
+also the direct cause of a separate bug below. Marked with a `ponytail:` comment and the restore
+path in `queries.ts`; `CLAUDE.md`'s invariant line rewritten so it states the override instead of
+silently going stale.
+
+**A real bug, caught by an intentionally adversarial recruiter-question test session**: asked the
+chat "top 3 for Senior SWE, Product (strength)" — the tool's own rows came back correctly ordered
+(offer-stage candidate first per the real stage-first rule, verified independently), but the
+model's prose swapped positions 2 and 3, silently re-sorting by the visible score number instead of
+relaying the order it was actually given. Root cause: "never sort results yourself" read naturally
+as "don't issue your own ORDER BY," not "don't silently re-derive the display order from a number
+you can see." The `strength` simplification above happens to remove the failure mode for this
+specific case (no more stage-vs-score conflict to get wrong), but the underlying instruction gap —
+row order isn't self-evidently the answer to "who's #1" — is still open.
+
+**Also caught in that same session**: `query_metrics`'s `pass_rate` ignored `filters.round` entirely
+— `runEntityQuery` (the ranked-list path) had `if (f.round) where.push("i.round = ?")`, but
+`runMetric` (the metrics path) never had the equivalent line. "Pass rate for onsite interviews"
+silently computed over *all* rounds (55%, n=40) instead of onsite only (50%, n=8). One-line fix,
+found by cross-checking the tool's answer against a raw SQL query with the exact same WHERE shape.
+
+**Ask Alex sidebar gets structured candidate cards**, same treatment `generate_interview_questions`
+already had: `query_entities` results now stream to the frontend as real rows (`routes/ask.ts` →
+`api.ts`'s `CandidateRow` → `Sidebar.tsx`'s new `CandidateCards`), rendered as name + score badge +
+a mode-appropriate "why" line (met/missing/nice-to-have skills for job_fit; stage/round/date for
+strength/score). Whole card is a link, opens in a new tab. Model instructed to stop re-enumerating
+candidates in prose now that cards render them — backstopped in code too
+(`hideRedundantRecordLines`), because the prompt instruction alone didn't reliably stick, the same
+lesson as the earlier hallucinated-URL fix. Two bugs found and fixed while building this:
+a turn that calls `query_entities` twice (small limit for the answer, larger limit just for a pool
+count) was letting the *second* call's rows silently replace the first call's cards — now keeps
+whichever arrived first; and cards/questions were rendering mid-stream, next to the still-running
+busy indicator, before the model's own text had started — now held back until the whole turn
+finishes, so text and cards appear together instead of the busy dots sitting next to
+finished-looking content.
+
+**Frontend**: job detail page's "Job status" table is now sortable (reused the existing
+`SortableHead`/`sortRows` pattern from the Jobs/Candidates/Interviews list pages, not a new
+component); `openings` now shown in the job header (was already computed for chat answers but never
+rendered); sidebar auto-focuses its input on open.
+
 ## 2026-09-19 — job_fit gets a single-candidate and applicant-stage mode, call/tool/answer timing, UI cleanup
 
 **`job_fit` had no way to answer "what's X's fit score" or "top fit among who's applied."**

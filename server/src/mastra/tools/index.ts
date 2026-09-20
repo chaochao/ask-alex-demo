@@ -169,7 +169,8 @@ export const queryEntities = createTool({
     "job_fit has two distinct modes and the caller must pick deliberately, because they answer different recruiter questions: filters.jobId alone ranks the ENTIRE candidate pool " +
     "regardless of application status — 'who's the best fit for this role' / sourcing people worth reaching out to who haven't applied. Adding filters.stage narrows that same ranking " +
     "to only this job's own applicants already at that stage — 'top 3 fit among people who applied' / shortlisting who's already in the pipeline for an interview decision. " +
-    "Do not add filters.stage unless the question explicitly scopes to applicants/pipeline/a stage; default to the whole-pool mode. " +
+    "Default to filters.stage: 'applied' — most job_fit questions mean this job's own applicants, not open-ended sourcing. Only drop filters.stage for the whole-pool mode when the " +
+    "question explicitly says so ('whole candidate pool', 'regardless of who's applied', sourcing language); use a different named stage instead of 'applied' if one is named. " +
     "filters.skills (with filters.skillMatch: 'all' or 'any', default 'all') filters the whole candidate pool by named skills, independent of any job — use for 'who knows React and Node'.",
   inputSchema: z.object({
     entity: z.enum(["candidate","job","interview","application"]).default("candidate"),

@@ -4,9 +4,11 @@ export const api = async <T,>(path: string): Promise<T> => {
   return r.json();
 };
 
+export type CandidateRow = { id: string; label: string; url: string; sortValue: number | null; context: Record<string, unknown> };
+
 export type Frame =
   | { event: "tool-call"; data: { id: string; tool: string; args: unknown } }
-  | { event: "tool-result"; data: { id: string; tool: string; rows?: number; questions?: { text: string; category: string; rationale: string }[] } }
+  | { event: "tool-result"; data: { id: string; tool: string; rows?: number; questions?: { text: string; category: string; rationale: string }[]; candidates?: CandidateRow[] } }
   | { event: "token"; data: { t: string } }
   | { event: "error"; data: { message: string } }
   | { event: "done"; data: { threadId: string } };

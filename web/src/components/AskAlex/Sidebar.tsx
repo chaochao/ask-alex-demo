@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X, RotateCcw, SendHorizontal, ChevronRight, ChevronDown, ThumbsUp, ThumbsDown } from "lucide-react";
-import { askStream } from "../../lib/api";
+import { askStream, type CandidateRow } from "../../lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 
 type Question = { text: string; category: string; rationale: string };
 type Step = { id: string; tool: string; status: "running" | "done"; rows?: number };
-type Msg = { role: "user" | "assistant"; text: string; questions?: Question[]; steps?: Step[]; feedback?: "up" | "down" };
+type Msg = { role: "user" | "assistant"; text: string; questions?: Question[]; candidates?: CandidateRow[]; steps?: Step[]; feedback?: "up" | "down" };
 
 // UI-only for now — clicking just sets local state, nothing is sent anywhere.
 function FeedbackButtons({ value, onChange }: { value?: "up" | "down"; onChange: (v: "up" | "down" | undefined) => void }) {
@@ -40,6 +40,20 @@ const IS_APP_LINK = /^\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+$/;
 // one) — strip it before linkifying so a hallucinated "https://app.example.com" never shows up
 // next to the correct link.
 const FAKE_HOST_RE = /https?:\/\/\S*?(?=\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+)/g;
+// The model is told not to re-enumerate candidates in prose once cards render them (below), but
+// that's a prompt instruction, not a guarantee — this is the code-level backstop: drop any line
+// that names a candidate/job/interview record, since the cards already show it, rather than
+// trusting the model to have actually left it out.
+const APP_LINK_LINE_RE = /\/(?:candidates|jobs|interviews)\/[A-Za-z0-9_-]+/;
+function hideRedundantRecordLines(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !APP_LINK_LINE_RE.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function linkify(text: string) {
   return text.replace(FAKE_HOST_RE, "").split(APP_LINK_RE).map((part, i) =>
     IS_APP_LINK.test(part)
@@ -145,6 +159,55 @@ function TypingDots() {
   );
 }
 
+// query_entities' row shape varies by sort mode (job_fit vs strength/score vs a skills filter) —
+// this covers each one it actually returns rather than dumping the raw context object.
+function CandidateCards({ rows }: { rows: import("../../lib/api").CandidateRow[] }) {
+  return (
+    <ol className="mt-3 list-none space-y-2">
+      {rows.map((r) => {
+        const ctx = r.context ?? {};
+        const isJobFit = Array.isArray(ctx.missingRequired);
+        // job_fit's "why": met required skills earn full/partial credit, missing ones cost credit,
+        // nice-to-have adds a little — show all three so the score isn't just a trust-me number.
+        const why = isJobFit
+          ? [
+              (ctx.metRequired as string[])?.length ? `Has: ${(ctx.metRequired as string[]).join(", ")}` : null,
+              (ctx.missingRequired as string[])?.length ? `Missing: ${(ctx.missingRequired as string[]).join(", ")}` : null,
+              (ctx.niceToHave as string[])?.length ? `Nice-to-have: ${(ctx.niceToHave as string[]).join(", ")}` : null,
+            ].filter(Boolean).join(" · ") || "Meets all required skills"
+          : null;
+        return (
+          <li key={r.id}>
+            <a
+              href={r.url} target="_blank" rel="noopener noreferrer"
+              className="block rounded-lg border bg-background p-2.5 transition-colors hover:bg-muted/50"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{r.label}</span>
+                {r.sortValue != null && (
+                  <Badge variant="outline" className="shrink-0 text-xs font-normal tabular-nums">
+                    {isJobFit ? `${r.sortValue}% fit` : typeof ctx.score === "number" ? `score ${ctx.score}` : r.sortValue}
+                  </Badge>
+                )}
+              </div>
+              {why ? (
+                <p className="mt-1 text-xs text-muted-foreground">{why}</p>
+              ) : typeof ctx.stage === "string" ? (
+                <p className="mt-1 text-xs text-muted-foreground capitalize">
+                  {ctx.stage}{ctx.round ? ` · ${String(ctx.round).replace(/_/g, " ")}` : ""}
+                  {ctx.interviewedAt ? ` · ${new Date(ctx.interviewedAt as string).toLocaleDateString()}` : ""}
+                </p>
+              ) : typeof ctx.currentTitle === "string" ? (
+                <p className="mt-1 text-xs text-muted-foreground">{ctx.currentTitle}{ctx.yearsExperience != null ? ` · ${ctx.yearsExperience}y` : ""}</p>
+              ) : null}
+            </a>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export function AskAlexSidebar({ open, onClose, pageContext }:{
   open: boolean; onClose: () => void;
   pageContext?: { route?: string; entityType?: string; entityId?: string; label?: string };
@@ -168,6 +231,8 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
+
+  useEffect(() => { if (open) textareaRef.current?.focus(); }, [open]);
 
   const suggestions = pageContext?.entityType === "job"
     ? ["How is this pipeline doing?", "Top candidates for this role", "Generate 8 interview questions for this JD"]
@@ -194,7 +259,11 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
           if (m.length === 0) return m;
           const copy = [...m]; const last = copy[copy.length - 1];
           const steps = (last.steps ?? []).map((s) => s.id === f.data.id ? { ...s, status: "done" as const, rows: f.data.rows } : s);
-          copy[copy.length - 1] = { ...last, steps, questions: f.data.questions ?? last.questions };
+          // A turn can call query_entities twice (a small limit for the answer, a larger one just
+          // to total the pool/bucket count) — keep the FIRST candidates array, not whichever
+          // tool-result happens to arrive last, or the second call's full list silently replaces
+          // the top-N cards the model actually meant to show.
+          copy[copy.length - 1] = { ...last, steps, questions: f.data.questions ?? last.questions, candidates: last.candidates ?? f.data.candidates };
           return copy;
         });
         if (f.event === "token") setMessages((m) => {
@@ -261,8 +330,10 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
                   : "whitespace-pre-wrap text-foreground",
               )}
             >
-              {m.text ? linkify(m.text) : (live ? <TypingDots /> : "")}
-              {m.questions && m.questions.length > 0 && (
+              {m.text
+                ? linkify(m.candidates?.length ? hideRedundantRecordLines(m.text) : m.text)
+                : (live ? <TypingDots /> : "")}
+              {!live && m.questions && m.questions.length > 0 && (
                 <ol className="mt-3 list-none space-y-3">
                   {m.questions.map((q, qi) => (
                     <li key={qi} className="flex gap-2 rounded-lg border bg-background p-2.5">
@@ -276,6 +347,10 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
                   ))}
                 </ol>
               )}
+              {/* Held back until the turn finishes — showing cards mid-stream, next to the still-
+                  running busy indicator, read as broken (finished-looking content next to a
+                  "still working" spinner). Show everything together once the answer is ready. */}
+              {!live && m.candidates && m.candidates.length > 0 && <CandidateCards rows={m.candidates} />}
               {m.steps && <ToolSteps steps={m.steps} live={live} />}
               {m.role === "assistant" && m.text && !live && (
                 <FeedbackButtons

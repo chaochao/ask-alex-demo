@@ -477,9 +477,20 @@ function CompetencyBar({ label, score, evidence }: { label: string; score: numbe
 function JobDetail() {
   const { jobId } = useParams({ strict: false }) as { jobId: string };
   const { data: j } = useQuery({ queryKey: ["job", jobId], queryFn: () => api<any>(`/api/jobs/${jobId}`) });
+  const [sort, setSort] = useState<SortState<"candidate" | "stage" | "round" | "status" | "score" | "date">>({ key: null, dir: "asc" });
   if (!j) return <Loading />;
-  const ranked = [...j.applications]
-    .sort((a: any, b: any) => (b.interview?.feedback?.scoreRaw ?? -Infinity) - (a.interview?.feedback?.scoreRaw ?? -Infinity));
+  const ranked = sortRows(
+    [...j.applications].sort((a: any, b: any) => (b.interview?.feedback?.scoreRaw ?? -Infinity) - (a.interview?.feedback?.scoreRaw ?? -Infinity)),
+    sort,
+    {
+      candidate: (a: any) => `${a.candidate.firstName} ${a.candidate.lastName}`,
+      stage: (a: any) => STAGE_ORDER.indexOf(a.stage),
+      round: (a: any) => a.interview?.round ?? "",
+      status: (a: any) => a.interview?.status ?? "",
+      score: (a: any) => a.interview?.feedback?.scoreRaw ?? -Infinity,
+      date: (a: any) => new Date(a.interview ? (a.interview.completedAt ?? a.interview.scheduledAt) : a.appliedAt).getTime(),
+    },
+  );
   const byStage: Record<string, number> = Object.fromEntries(j.byStage.map((s: any) => [s.dimension, s.value]));
   const stageCards = STAGE_ORDER.filter((s) => byStage[s] != null).map((s) => ({ stage: s, value: byStage[s] }));
   return (
@@ -535,12 +546,12 @@ function JobDetail() {
               <Table>
                 <TableHeader>
                   <TableRow className="border-[var(--warm-border)] hover:bg-transparent">
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Candidate</TableHead>
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Stage</TableHead>
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Round</TableHead>
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Interview status</TableHead>
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Score</TableHead>
-                    <TableHead className="text-[var(--warm-ink)] opacity-60">Date</TableHead>
+                    <SortableHead label="Candidate" sortKey="candidate" sort={sort} setSort={setSort} />
+                    <SortableHead label="Stage" sortKey="stage" sort={sort} setSort={setSort} />
+                    <SortableHead label="Round" sortKey="round" sort={sort} setSort={setSort} />
+                    <SortableHead label="Interview status" sortKey="status" sort={sort} setSort={setSort} />
+                    <SortableHead label="Score" sortKey="score" sort={sort} setSort={setSort} />
+                    <SortableHead label="Date" sortKey="date" sort={sort} setSort={setSort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
