@@ -72,7 +72,33 @@ export const generateInterviewQuestions = createTool({
     // The agent itself generates structured output; see routes/ask.ts for how this is wired.
     const agent = mastra?.getAgent("askAlex");
     if (!agent) throw new Error("askAlex agent not available on tool context");
-    const result = await agent.generate(prompt, { output: z.object({ questions: z.array(questionSchema) }) });
+    // NoObjectGeneratedError (model returned text that didn't match the schema) is not retried by
+    // the AI SDK's own maxRetries — that only covers failed API calls, not validation failures.
+    // Same 3-attempt/backoff shape as evals/run.ts's generateWithRetry, plus: on a schema mismatch
+    // specifically, resending the identical prompt tends to reproduce the identical mistake — so
+    // feed the model's own rejected output back on the next attempt instead of retrying blind.
+    // AI SDK's NoObjectGeneratedError carries the raw text that failed validation as `.text`;
+    // Mastra surfaces it one level down as `err.cause` — anything else (network, rate limit) won't
+    // have that shape, and gets a plain backoff retry.
+    let result: any;
+    let badOutput: string | undefined;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const retryPrompt = badOutput
+          ? `${prompt}\n\nYour previous attempt returned this, which failed schema validation. Return ONLY ` +
+            `valid JSON matching { questions: [...] } this time — every field is required, fix whatever's ` +
+            `missing or malformed:\n<<<PREV\n${badOutput.slice(0, 1500)}\nPREV`
+          : prompt;
+        result = await agent.generate(retryPrompt, { output: z.object({ questions: z.array(questionSchema) }) });
+        break;
+      } catch (err: any) {
+        badOutput = typeof err?.cause?.text === "string" ? err.cause.text : undefined;
+        console.log(`[generate_interview_questions] attempt ${attempt} failed: ${err?.message}` +
+          (badOutput ? ` — retrying with feedback (${badOutput.length} chars)` : " — retrying"));
+        if (attempt === 3) throw err;
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+      }
+    }
     const raw: z.infer<typeof questionSchema>[] = (result as any).object?.questions ?? [];
 
     const validIds = new Set(reqs.map((r) => r.id));

@@ -3,6 +3,41 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-20 (cont'd) — generate_interview_questions retries a schema mismatch with feedback
+
+Watched `generate_interview_questions` throw `NoObjectGeneratedError` live (real question: "top 3
+job fit" turn's follow-up asked for 8 generated questions). Before doing anything, checked what
+retry coverage actually exists rather than assume — installed `@mastra/core` has no `dist/docs` in
+this version, so went to source: `createTool`'s `ToolAction` type has no retry field at all
+(`retries?: number` exists only on Workflow's `createStep`, unused here). Checked the underlying
+`ai` package next: its `maxRetries` (default 2) only retries an actual failed API call
+(`APICallError` with `isRetryable === true` — network/429/5xx), traced in
+`node_modules/ai/dist/index.js:363-401`. A `NoObjectGeneratedError` for a response that came back
+fine but failed schema validation is thrown *outside* that retry-wrapped block, so it's never
+covered. Confirms the "verify in code, not just the prompt" lesson from earlier today generalizes
+one step further: sometimes there's no code enforcing the default *anywhere*, not even in a
+library you'd expect to have it.
+
+**Fix, `server/src/mastra/tools/generate-questions.ts`:** wrapped the tool's own
+`agent.generate(prompt, {output: ...})` call in a 3-attempt retry (same 2s/4s backoff shape as
+`evals/run.ts`'s `generateWithRetry`) — but on a schema-validation failure specifically, read
+`err.cause.text` (the AI SDK's own field holding the exact raw text that failed validation) and
+feed it back into the next attempt's prompt ("your previous attempt returned this, which failed
+schema validation... fix whatever's missing or malformed"), instead of resending an identical
+prompt into an intermittent failure that's likely to reproduce itself. Any other error shape
+(network, rate limit) just gets a plain backoff retry — prompt feedback can't fix those. Added a
+one-line `console.log` on the rare retry path for visibility (kept, not scratch — low-noise,
+matches `routes/ask.ts`'s existing debug-log style).
+
+**Live-tested, not just type-checked:** wrote a throwaway script calling the tool directly with the
+exact job/args that failed earlier (`jobId: cmu4eik99...`, the same `mix` object), ran it 5 times.
+2 of 5 hit the schema mismatch — confirms this is a real, non-rare failure mode, not a one-off.
+One of those recovered on attempt 2 after seeing its own rejected output; the other failed all 3
+attempts even with feedback each time, and threw cleanly rather than looping or returning a
+silently short question list. So: meaningfully reduces the failure rate, always fails legibly when
+it still fails, does not root-cause *why* the model sometimes emits invalid structured output for
+this schema — noted as still-open in `ask-chao-internals.html` §10's now-updated entry on this bug.
+
 ## 2026-09-20 — two prompt-only defaults moved into code (window, job_fit stage)
 
 **Root-caused the `job_fit` non-determinism flagged as a caveat on 2026-09-19 ("same neutral
