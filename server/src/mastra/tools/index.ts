@@ -21,13 +21,21 @@ const filters = z.object({
   skills: z.array(z.string()).optional(),
   skillMatch: z.enum(["all","any"]).optional(),
   candidateId: z.string().optional(),
+  wholePool: z.boolean().optional().describe(
+    "sort.by=job_fit only. Scoped to a job (filters.jobId/jobTitle), job_fit defaults to that job's " +
+    "own applicants (stage=applied) even if you don't set filters.stage — set wholePool:true only " +
+    "when the question explicitly wants sourcing across everyone, applied or not " +
+    "(\"whole candidate pool\", \"regardless of who's applied\")."
+  ),
 }).optional();
 
 const windowSchema = z.object({
   field: z.enum(["interview_completed","interview_scheduled","applied","offer_extended"]).optional(),
   relative: z.enum(["today","this_week","last_week","last_7_days","last_14_days","last_30_days","quarter_to_date"]).optional(),
   from: z.string().optional(), to: z.string().optional(),
-}).optional();
+}).optional().describe(
+  "Omit entirely for all-time (the real default) — only set this if the user stated a time range. Never guess a period (e.g. quarter_to_date) on your own."
+);
 
 // Match per significant word, not the whole phrase — a two-word query like "Hugo Okafor" or
 // "Staff Backend Engineer" must not require one column to contain that entire string; each word

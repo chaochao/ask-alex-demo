@@ -45,6 +45,7 @@ export type Filters = {
   company?: string; roleFamily?: string; jobId?: string; jobTitle?: string; stage?: string; round?: string;
   interviewStatus?: string; source?: string; minScore?: number; recruiterId?: string; recruiterName?: string;
   location?: LocationKey; currentTitle?: string; skills?: string[]; skillMatch?: "all" | "any"; candidateId?: string;
+  wholePool?: boolean;
 };
 
 async function companyIdFromName(name: string) {
@@ -83,7 +84,7 @@ const STAGE_RANK = `CASE a.stage WHEN 'offer' THEN 4 WHEN 'interviewing' THEN 3 
 // when stage is given the query joins Application to scope to it.
 async function rankCandidatesByFit(f: Filters, limit: number) {
   const company = clean(f.company), jobTitle = clean(f.jobTitle), jobId = clean(f.jobId),
-        candidateId = clean(f.candidateId), stage = clean(f.stage);
+        candidateId = clean(f.candidateId);
   let resolvedCompany: string | null = null, resolvedCompanyId: string | undefined, resolvedJobId = jobId;
 
   if (company) {
@@ -97,6 +98,12 @@ async function rankCandidatesByFit(f: Filters, limit: number) {
     resolvedJobId = matches[0].id;
   }
   if (!resolvedJobId) return { rows: [], total: 0, resolved: { company: resolvedCompany, window: null, sortDefinition: "", asOf: asOf(), ambiguous: [] as string[] } };
+
+  // A job is resolved: default to its own applicants unless the caller explicitly asked for the
+  // whole pool. This is enforced here, not just told to the model in the prompt — a model that
+  // forgets to pass filters.stage should still get the applicant-scoped answer, not silently fall
+  // through to ranking all candidates in the database.
+  const stage = f.wholePool ? undefined : (clean(f.stage) ?? "applied");
 
   const reqs = await db.jobSkill.findMany({ where: { jobId: resolvedJobId }, include: { skill: true } });
   let sortDefinition = "required skills met (full credit if years meet the job's minimum, "

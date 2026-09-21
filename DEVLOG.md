@@ -3,6 +3,49 @@
 Running progress notes for ask-alex-demo. Newest entry on top. Not auto-loaded —
 read it when you want history; `CLAUDE.md` stays for standing invariants only.
 
+## 2026-09-20 — two prompt-only defaults moved into code (window, job_fit stage)
+
+**Root-caused the `job_fit` non-determinism flagged as a caveat on 2026-09-19 ("same neutral
+question, opposite defaults on two runs").** It wasn't wiring — it's that "default to
+`filters.stage: "applied"`" only existed in the prompt, so the model had to remember to pass it
+every single call, and sometimes didn't: asked "top 3 job fit candidates who apply for this job"
+(about as unambiguous as this gets), the tool call omitted `filters.stage` entirely, ranked the
+whole 120-candidate pool instead of the job's 12 real applicants, and the model's own answer then
+*claimed* "(default stage = applied)" — a statement its own tool call contradicts. Same session,
+same root cause, second bug: `query_metrics`' time window. Code default when `window` is omitted
+is all-time (`resolveWindow` → `null`); the prompt only said "use the default silently" without
+ever stating what it *is*. Same question twice → two different model-invented defaults: one run
+guessed `quarter_to_date` and reported "0 completed interviews" on a job that had 7 all-time; the
+retry omitted the window and got the real number.
+
+**Fix pattern, both times: stop telling the model the default, enforce it in code.**
+- `server/src/semantic/queries.ts` — `rankCandidatesByFit` now computes
+  `stage = f.wholePool ? undefined : (clean(f.stage) ?? "applied")` itself once a job is resolved,
+  instead of trusting the model to pass `filters.stage`. `Filters` gained `wholePool?: boolean` —
+  whole-pool sourcing is now an explicit opt-out the model has to state, not the silent behavior
+  when it forgets a filter. Verified directly against `runEntityQuery`: no flag → `total: 12`
+  (real applied-stage count) and rows restricted to that stage; `wholePool: true` → `total: 120`,
+  unrestricted, matching the old behavior.
+- `server/src/mastra/tools/index.ts` — added `wholePool` to the filters zod schema with a
+  `.describe()` explaining when to set it; added a `.describe()` to `windowSchema` stating
+  "omit for all-time (the real default) — never guess a period on your own."
+- `server/src/mastra/agents/ask-alex.ts` — job_fit section rewritten to say the default is
+  enforced in code now (model doesn't need to pass it), only `wholePool: true` opts out; window
+  guidance in the tool-parameter-defaults bullet corrected from "a metric's window [has a
+  documented default]" (never stated what it was) to "defaults to all-time... never guess one."
+  Added an explicit instruction: state in the reply which scope was actually used, never narrate a
+  scope the tool call didn't request — targets the second bug (the false "default stage = applied"
+  claim) directly, not just the missing filter.
+
+**The lesson, written up in `ask-chao-internals.html` section 10** (new callout, "A lesson
+confirmed twice: a prompt-only default is not a default"): this is the third confirmed instance in
+this codebase of the same mistake — telling the model a rule in the prompt instead of enforcing it
+in code (first instance was the hallucinated-URL / `hideRedundantRecordLines` fix, see below in
+this file). A prompt is advice a model can forget or invent around, not enforcement. Anywhere a
+tool has a "default" that matters for correctness, the default needs to be code's job, and the
+prompt's job is only to state facts about what actually happened (which scope was used, what the
+real default resolves to) — never to be the sole source of the decision itself.
+
 ## 2026-09-19 (cont'd) — job_fit defaults flipped, candidate cards in chat, a demo-only ranking simplification
 
 **job_fit's default is now "this job's applicants," not "the whole pool."** Live testing showed the

@@ -68,13 +68,14 @@ Rules:
   are missing typescript"). Only "strength" (the default) ranks by interview performance among
   people already in the pipeline — pick job_fit whenever the question is about fit for a role
   rather than how someone did in interviews.
-  Default to filters.stage: "applied" (this job's own applicants who haven't been screened yet) —
-  run it on that default immediately, do not ask the user to choose pool-vs-applicants or a stage
-  first. Only skip filters.stage and use the whole candidate pool when the question explicitly says
-  so ("whole candidate pool," "regardless of who's applied," "even people who haven't applied,"
-  sourcing language). If they name a different stage explicitly (interviewing, offer, etc.), use
-  that stage instead of "applied." If they wanted a different stage or the whole pool after seeing
-  the default, they'll say so, and you can rerun with the right filters.stage (or none).
+  When scoped to a job, this defaults in code to that job's own applicants (stage=applied) even if
+  you pass no filters.stage — you do not need to set it yourself, and do not ask the user to choose
+  pool-vs-applicants or a stage first. Only pass filters.wholePool:true when the question
+  explicitly wants the whole candidate pool ("whole candidate pool," "regardless of who's
+  applied," "even people who haven't applied," sourcing language). If they name a different stage
+  explicitly (interviewing, offer, etc.), pass that as filters.stage instead. State in your reply
+  which scope was actually used (applicants only, a named stage, or the whole pool) — never assume
+  or narrate a scope you didn't pass.
 - "Who knows React and Node" / "who has skill X" with no job named: query_entities with
   filters.skills (the skill names) and filters.skillMatch ("all" for AND, "any" for OR — ask if
   genuinely unclear, but default to "all" for "X and Y" and "any" for "X or Y" without asking).
@@ -91,10 +92,11 @@ Rules:
   confirm the count and role in one sentence, and say they are not yet saved unless persist was
   requested.
 - Never sort or filter results yourself. Ask the tool for the order you need.
-- Tool parameters that already have a documented default (query_entities' limit and sort.by, a
-  metric's window, job_fit's whole-pool-vs-applicants scope) do not need to be asked about — use
-  the default silently unless the user states a preference. Only ask about things with no default:
-  which job, which company, a missing date range.
+- Tool parameters that already have a documented default (query_entities' limit and sort.by,
+  job_fit's whole-pool-vs-applicants scope) do not need to be asked about — use the default
+  silently unless the user states a preference. A metric or ranking's time window defaults to
+  all-time: omit it unless the user states a range, never guess one (e.g. quarter_to_date) on your
+  own. Only ask about things with no default: which job, which company, a missing date range.
 - If a question is still ambiguous after that (which job? which company? what date range?) ask one
   clarifying question, covering everything unresolved in that single question.
 - If the metric does not exist, say so and list what is available: ${METRIC_NAMES.join(", ")}.
