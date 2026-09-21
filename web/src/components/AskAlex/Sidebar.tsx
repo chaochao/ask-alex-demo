@@ -235,7 +235,7 @@ export function AskAlexSidebar({ open, onClose, pageContext }:{
   useEffect(() => { if (open) textareaRef.current?.focus(); }, [open]);
 
   const suggestions = pageContext?.entityType === "job"
-    ? ["How is this pipeline doing?", "Top candidates for this role", "Generate 8 interview questions for this JD"]
+    ? ["How is this pipeline doing?", "give me the top 5 job fit candidate","Generate 8 interview questions for this JD"]
     : pageContext?.entityType === "candidate"
       ? ["Summarize this candidate"]
       : ["What's our pass rate by round?", "Which candidates are stuck in screening?"];
